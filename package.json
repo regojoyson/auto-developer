@@ -1,0 +1,23 @@
+{
+  "name": "auto-pilot",
+  "version": "1.0.0",
+  "description": "AI-Powered Development Automation Pipeline: Jira → Claude Code Agents → GitLab MR → Review Loop",
+  "main": "src/webhook/server.js",
+  "scripts": {
+    "start": "node src/webhook/server.js",
+    "dev": "node --watch src/webhook/server.js",
+    "setup": "bash setup.sh",
+    "go": "bash start.sh",
+    "stop": "bash stop.sh",
+    "mcp:gitlab": "node mcp-servers/gitlab/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "axios": "^1.15.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "mode": "multi",
+
+  "multi": {
+    "parentDir": "/Users/admin/projects"
+  },
+
+  "single": {
+    "repoDir": "/Users/admin/projects/my-project"
+  }
+}
