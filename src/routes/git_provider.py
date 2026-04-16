@@ -6,7 +6,7 @@ types:
 
 - **approved** -- Marks the pipeline as merged and triggers post-merge actions.
 - **push** -- Logs human pushes on tracked branches.
-- **comment** -- Triggers the feedback parser agent when a review comment
+- **comment** -- Triggers the rework pipeline when a review comment
   arrives on a PR that is awaiting review, subject to rework limits.
 
 Mount this router under ``/webhooks/git`` in the FastAPI app.
@@ -21,23 +21,22 @@ from fastapi import APIRouter, Request
 from src.config import config
 from src.state.manager import get_state, transition_state, is_rework_limit_exceeded, list_active_states
 from src.executor.runner import run_agent
+from src.executor.pipeline import run_rework_phases
 from src.providers.git_provider import get_git_provider
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _run_async(agent, input_data, cwd):
-    """Launch an agent in a background daemon thread.
-
-    Args:
-        agent: Name of the agent to run (e.g. ``"orchestrator"``).
-        input_data: JSON-encoded input string for the agent.
-        cwd: Working directory for the agent process.
-    """
-    import json as _json
-    _ik = _json.loads(input_data).get("issueKey", "unknown")
-    threading.Thread(target=run_agent, args=(agent, input_data), kwargs={"cwd": cwd, "issue_key": _ik}, daemon=True).start()
+def _get_statuses():
+    """Build the statuses dict from config."""
+    tracker_cfg = config["issue_tracker"]
+    return {
+        "trigger": tracker_cfg["trigger_status"],
+        "development": tracker_cfg["development_status"],
+        "done": tracker_cfg["done_status"],
+        "blocked": tracker_cfg["blocked_status"],
+    }
 
 
 @router.post("/")
@@ -46,7 +45,7 @@ async def handle_webhook(request: Request):
 
     Delegates payload parsing to the configured adapter, then dispatches
     based on the event type: transitions state on approval, logs pushes,
-    and triggers the feedback parser on review comments (respecting the
+    and triggers the rework pipeline on review comments (respecting the
     configured rework iteration limit).
 
     Args:
@@ -77,15 +76,18 @@ async def handle_webhook(request: Request):
             return {"received": True}
         logger.info(f"PR approved for {state['issueKey']} ({branch})")
         transition_state(branch, "merged")
-        tracker_cfg = config["issue_tracker"]
-        _run_async("orchestrator", json.dumps({
-            "action": "merge-approved", "issueKey": state["issueKey"], "branch": branch, "prId": pr_id,
-            "statuses": {
-                "trigger": tracker_cfg["trigger_status"],
-                "done": tracker_cfg["done_status"],
-                "blocked": tracker_cfg["blocked_status"],
-            },
-        }), state.get("repoPath", "."))
+        statuses = _get_statuses()
+
+        def _run_merge():
+            run_agent("orchestrator", json.dumps({
+                "action": "merge-approved",
+                "issueKey": state["issueKey"],
+                "branch": branch,
+                "prId": pr_id,
+                "statuses": statuses,
+            }), cwd=state.get("repoPath", "."), issue_key=state["issueKey"])
+
+        threading.Thread(target=_run_merge, daemon=True).start()
 
     elif event == "push":
         state = get_state(branch)
@@ -108,21 +110,26 @@ async def handle_webhook(request: Request):
         max_rework = config["pipeline"]["max_rework_iterations"]
         if is_rework_limit_exceeded(resolved_branch, max_rework):
             logger.warning(f"Rework limit exceeded for {state['issueKey']}")
-            tracker_cfg = config["issue_tracker"]
-            _run_async("orchestrator", json.dumps({
-                "action": "rework-limit-exceeded", "issueKey": state["issueKey"],
-                "branch": resolved_branch, "reworkCount": state.get("reworkCount", 0),
-                "statuses": {
-                    "trigger": tracker_cfg["trigger_status"],
-                    "done": tracker_cfg["done_status"],
-                    "blocked": tracker_cfg["blocked_status"],
-                },
-            }), state.get("repoPath", "."))
+            statuses = _get_statuses()
+
+            def _run_escalation():
+                run_agent("orchestrator", json.dumps({
+                    "action": "rework-limit-exceeded",
+                    "issueKey": state["issueKey"],
+                    "branch": resolved_branch,
+                    "reworkCount": state.get("reworkCount", 0),
+                    "statuses": statuses,
+                }), cwd=state.get("repoPath", "."), issue_key=state["issueKey"])
+
+            threading.Thread(target=_run_escalation, daemon=True).start()
             return {"received": True}
 
-        logger.info(f"Review comment for {state['issueKey']}, invoking feedback parser")
-        _run_async("feedback-parser", json.dumps({
-            "issueKey": state["issueKey"], "branch": resolved_branch, "prId": pr_id,
-        }), state.get("repoPath", "."))
+        logger.info(f"Review comment for {state['issueKey']}, starting rework pipeline")
+        statuses = _get_statuses()
+        threading.Thread(
+            target=run_rework_phases,
+            args=(state["issueKey"], resolved_branch, pr_id, statuses, state.get("repoPath", ".")),
+            daemon=True,
+        ).start()
 
     return {"received": True}
