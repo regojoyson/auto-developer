@@ -63,6 +63,7 @@ def load() -> dict:
             "type": raw.get("issueTracker", {}).get("type", "jira"),
             "trigger_status": raw.get("issueTracker", {}).get("triggerStatus", "Ready for Development"),
             "done_status": raw.get("issueTracker", {}).get("doneStatus", "Done"),
+            "blocked_status": raw.get("issueTracker", {}).get("blockedStatus", "Blocked"),
             "bot_users": raw.get("issueTracker", {}).get("botUsers", []),
         },
         "git_provider": {

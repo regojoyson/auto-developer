@@ -21,6 +21,7 @@ import threading
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from src.config import config as app_config
 from src.state.manager import get_state, create_state
 from src.executor.runner import run_agent
 from src.repos.resolver import get_repo_dir, prepare_repo, get_base_branch
@@ -81,12 +82,18 @@ async def manual_trigger(body: TriggerRequest):
     create_state(branch, issue_key, repo_path=repo_dir)
 
     base_branch = get_base_branch()
+    tracker_cfg = app_config["issue_tracker"]
     input_data = json.dumps({
         "issueKey": issue_key,
         "branch": branch,
         "summary": summary,
         "projectKey": issue_key.split("-")[0],
         "baseBranch": base_branch,
+        "statuses": {
+            "trigger": tracker_cfg["trigger_status"],
+            "done": tracker_cfg["done_status"],
+            "blocked": tracker_cfg["blocked_status"],
+        },
     })
 
     threading.Thread(

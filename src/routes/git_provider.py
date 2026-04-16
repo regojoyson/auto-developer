@@ -77,8 +77,14 @@ async def handle_webhook(request: Request):
             return {"received": True}
         logger.info(f"PR approved for {state['issueKey']} ({branch})")
         transition_state(branch, "merged")
+        tracker_cfg = config["issue_tracker"]
         _run_async("orchestrator", json.dumps({
             "action": "merge-approved", "issueKey": state["issueKey"], "branch": branch, "prId": pr_id,
+            "statuses": {
+                "trigger": tracker_cfg["trigger_status"],
+                "done": tracker_cfg["done_status"],
+                "blocked": tracker_cfg["blocked_status"],
+            },
         }), state.get("repoPath", "."))
 
     elif event == "push":
@@ -102,9 +108,15 @@ async def handle_webhook(request: Request):
         max_rework = config["pipeline"]["max_rework_iterations"]
         if is_rework_limit_exceeded(resolved_branch, max_rework):
             logger.warning(f"Rework limit exceeded for {state['issueKey']}")
+            tracker_cfg = config["issue_tracker"]
             _run_async("orchestrator", json.dumps({
                 "action": "rework-limit-exceeded", "issueKey": state["issueKey"],
                 "branch": resolved_branch, "reworkCount": state.get("reworkCount", 0),
+                "statuses": {
+                    "trigger": tracker_cfg["trigger_status"],
+                    "done": tracker_cfg["done_status"],
+                    "blocked": tracker_cfg["blocked_status"],
+                },
             }), state.get("repoPath", "."))
             return {"received": True}
 

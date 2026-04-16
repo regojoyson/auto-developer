@@ -34,12 +34,16 @@ ISSUE_TRACKER_DEFAULTS = {
         "trigger_default": "Ready for Development",
         "done_label": "Done status",
         "done_default": "Done",
+        "blocked_label": "Blocked status",
+        "blocked_default": "Blocked",
     },
     "github-issues": {
         "trigger_label": "Trigger label",
         "trigger_default": "ready-for-dev",
         "done_label": "Done label",
         "done_default": "done",
+        "blocked_label": "Blocked label",
+        "blocked_default": "blocked",
     },
 }
 

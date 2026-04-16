@@ -252,6 +252,14 @@ def ask_issue_tracker(total_steps: int, prev: dict | None = None) -> dict:
         default=p.get("doneStatus", defaults["done_default"]), style=STYLE
     ).ask()
 
+    console.print()
+    info("When a ticket lacks enough detail to proceed, the pipeline blocks it.")
+    info("Set the status/label the ticket should transition to.")
+    config["blockedStatus"] = questionary.text(
+        f"{defaults['blocked_label']} (insufficient details):",
+        default=p.get("blockedStatus", defaults["blocked_default"]), style=STYLE
+    ).ask()
+
     return config
 
 
@@ -472,6 +480,7 @@ def show_summary(config: dict, env_vars: dict, total_steps: int):
     table.add_row("Issue tracker", config["issueTracker"]["type"])
     table.add_row("Trigger", config["issueTracker"].get("triggerStatus", ""))
     table.add_row("Done status", config["issueTracker"].get("doneStatus", ""))
+    table.add_row("Blocked status", config["issueTracker"].get("blockedStatus", ""))
     table.add_row("", "")
 
     table.add_row("Git provider", config["gitProvider"]["type"])
