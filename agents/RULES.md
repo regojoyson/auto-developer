@@ -99,6 +99,6 @@ All decisions in this pipeline are **auto-approved and self-selected**. There is
 - **Slack MCP**: Send notifications to team channels
 
 ## Pipeline State Machine
-States: `brainstorming` → `developing` → `awaiting-review` → `reworking` → `merged`
+States: `analyzing` → `planning` → `developing` → `awaiting-review` → `reworking` → `merged` | `failed`
 - Check state before any agent invocation
 - Rework capped at 3 iterations — escalate to Slack if exceeded
