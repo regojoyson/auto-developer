@@ -61,7 +61,7 @@ cd auto-developer
 # 0. Check prerequisites first: docs/prerequisites.md
 ./setup.sh     # interactive wizard — generates config
 # fill in tokens in .env
-./start.sh     # validates, starts server + ngrok
+./start.sh     # validates, starts server, prints webhook URLs
 ```
 
 ```bash

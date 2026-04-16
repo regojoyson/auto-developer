@@ -4,7 +4,7 @@
 #
 #  Usage:  ./stop.sh
 #
-#  1. Kills the webhook server and ngrok tunnel
+#  1. Kills the webhook server
 #  2. Removes .claude/ symlinks from target repos
 # ─────────────────────────────────────────────────────────
 
@@ -31,13 +31,6 @@ SERVER_PIDS=$(pgrep -f "node.*src/webhook/server.js" 2>/dev/null || true)
 if [ -n "$SERVER_PIDS" ]; then
   echo "$SERVER_PIDS" | xargs kill 2>/dev/null
   ok "Webhook server stopped"
-  KILLED=1
-fi
-
-NGROK_PIDS=$(pgrep -f "ngrok.*http" 2>/dev/null || true)
-if [ -n "$NGROK_PIDS" ]; then
-  echo "$NGROK_PIDS" | xargs kill 2>/dev/null
-  ok "ngrok tunnel stopped"
   KILLED=1
 fi
 

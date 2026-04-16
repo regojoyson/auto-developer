@@ -20,7 +20,7 @@ Key items:
 - **Git provider token** (GitLab or GitHub)
 - **Jira MCP configured in your CLI** (if using Jira as issue tracker)
 - **Slack MCP configured in your CLI** (if using Slack notifications)
-- **ngrok** (optional, for webhook tunneling)
+- **Server with public IP or domain** (for webhook delivery from issue trackers / git providers)
 
 **Important:** The Jira and Slack MCP servers are configured in your CLI tool (e.g. `~/.claude/settings.json`), not in Auto Developer. See [prerequisites.md](prerequisites.md) for setup instructions.
 
@@ -117,7 +117,7 @@ This will:
 3. Validate your config and tokens
 4. Generate the MCP server config
 5. Start the webhook server
-6. Start ngrok (if installed) and print webhook URLs
+6. Print webhook URLs to configure
 
 You should see:
 ```
@@ -134,7 +134,7 @@ You should see:
 
 ## Step 5: Configure webhooks
 
-Use the URLs printed by `start.sh`. If using ngrok, they look like `https://abc123.ngrok.io/...`.
+Use your server's public URL with the paths printed by `start.sh`:
 
 ### Jira webhook
 
@@ -200,7 +200,7 @@ curl http://localhost:3000/api/status/PROJ-1
 ./stop.sh
 ```
 
-This kills the server, stops ngrok, and removes `.claude/` symlinks from your repos.
+This kills the server and removes agent symlinks from your repos.
 
 ---
 
@@ -213,8 +213,8 @@ Run `./setup.sh` first.
 Edit `.env` and add your token. See Step 3.
 
 **"Webhook not received"**
-- Is ngrok running? Check `http://localhost:4040`
-- Does the URL in Jira/GitHub match?
+- Is the server reachable from the internet? Check with `curl http://<your-host>:3000/health`
+- Does the URL in Jira/GitHub match your server's public address?
 - Test locally: `curl -X POST http://localhost:3000/webhooks/issue-tracker -H 'Content-Type: application/json' -d '{}'`
 
 **"Agent timed out"**

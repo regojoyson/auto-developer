@@ -2,7 +2,7 @@
 # ─────────────────────────────────────────────────────────
 #  Auto-Pilot — One-shot startup script
 #
-#  Reads config.yaml + .env, validates, starts server + ngrok.
+#  Reads config.yaml + .env, validates, starts webhook server.
 # ─────────────────────────────────────────────────────────
 
 set -e
@@ -142,25 +142,6 @@ sleep 1
 kill -0 $SERVER_PID 2>/dev/null || fail "Server failed to start"
 ok "Server running (PID: $SERVER_PID)"
 
-# ── 9. ngrok ──────────────────────────────────────────
-
-if command -v ngrok &>/dev/null; then
-  info "Starting ngrok..."
-  ngrok http $PORT --log=stdout > /tmp/ngrok-autopilot.log 2>&1 &
-  NGROK_PID=$!
-  sleep 2
-  NGROK_URL=$(curl -s http://localhost:4040/api/tunnels 2>/dev/null | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{console.log(JSON.parse(d).tunnels[0].public_url)}catch(e){console.log('')}})" 2>/dev/null)
-  if [ -n "$NGROK_URL" ]; then
-    ok "ngrok: $NGROK_URL"
-    echo ""
-    echo -e "  ${CYAN}Webhook URLs:${NC}"
-    echo -e "    Issue tracker: ${GREEN}${NGROK_URL}/webhooks/issue-tracker${NC}"
-    echo -e "    Git provider:  ${GREEN}${NGROK_URL}/webhooks/git${NC}"
-  fi
-else
-  warn "ngrok not found — server is local-only on port $PORT"
-fi
-
 # ── Done ──────────────────────────────────────────────
 
 echo ""
@@ -168,6 +149,12 @@ echo -e "${GREEN}═════════════════════
 echo -e "${GREEN}  Auto-Pilot running!${NC}"
 echo -e "${GREEN}  $ISSUE_TRACKER + $GIT_PROVIDER + $CLI_ADAPTER${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
+echo ""
+echo -e "  Webhook URLs:"
+echo -e "    Issue tracker: ${CYAN}http://<your-host>:${PORT}/webhooks/issue-tracker${NC}"
+echo -e "    Git provider:  ${CYAN}http://<your-host>:${PORT}/webhooks/git${NC}"
+echo -e "    Manual trigger: ${CYAN}http://<your-host>:${PORT}/api/trigger${NC}"
+echo -e "    Status:         ${CYAN}http://<your-host>:${PORT}/api/status${NC}"
 echo ""
 echo -e "  Health: ${CYAN}curl http://localhost:${PORT}/health${NC}"
 echo -e "  Press ${YELLOW}Ctrl+C${NC} to stop"
@@ -177,7 +164,6 @@ cleanup() {
   echo ""
   info "Shutting down..."
   kill $SERVER_PID 2>/dev/null && ok "Server stopped"
-  [ -n "$NGROK_PID" ] && kill $NGROK_PID 2>/dev/null && ok "ngrok stopped"
   exit 0
 }
 trap cleanup SIGINT SIGTERM

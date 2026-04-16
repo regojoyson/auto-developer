@@ -124,28 +124,6 @@ For other CLIs (Codex, Gemini), refer to their documentation for MCP server conf
 
 ---
 
-## Optional
-
-### ngrok (for webhooks during development)
-
-If you want Jira/GitHub to send webhooks to your local machine:
-
-```bash
-# Install
-brew install ngrok   # or: https://ngrok.com/download
-
-# Authenticate (one-time)
-ngrok config add-authtoken <your-token>
-```
-
-`start.sh` starts ngrok automatically if it's installed.
-
-Without ngrok, you can still use the **manual trigger API**:
-```bash
-curl -X POST http://localhost:3000/api/trigger \
-  -d '{"issueKey": "PROJ-42"}'
-```
-
 ---
 
 ## Checklist
@@ -158,4 +136,4 @@ Before running `./setup.sh`:
 - [ ] Git provider token ready (GitLab or GitHub)
 - [ ] Jira MCP configured in your CLI (if using Jira)
 - [ ] Slack MCP configured in your CLI (if using notifications)
-- [ ] ngrok installed (optional, for webhooks)
+- [ ] Server with public IP or domain (for webhook delivery)

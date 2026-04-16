@@ -32,7 +32,7 @@ const PORT = config.pipeline.port;
 // Parse JSON payloads up to 1 MB (webhook payloads can be large)
 app.use(express.json({ limit: '1mb' }));
 
-// Health check — useful for monitoring and ngrok tunnel verification
+// Health check — useful for monitoring and uptime checks
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });

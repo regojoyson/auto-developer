@@ -277,7 +277,7 @@ The pipeline must run **on a machine with access to:**
 3. Claude Code CLI (authenticated)
 4. Internet access for Jira and Slack APIs
 
-The webhook receiver runs as a local Express server. During development, use ngrok to expose it for Jira/GitLab webhook delivery.
+The webhook receiver runs as an Express server. Deploy it on a server with a public IP or domain so issue trackers and git providers can send webhooks to it.
 
 ### How Agents Access the Codebase
 
