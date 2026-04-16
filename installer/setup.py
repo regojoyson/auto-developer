@@ -233,10 +233,17 @@ def ask_issue_tracker(total_steps: int, prev: dict | None = None, prev_env: dict
     info("  [bold]Built-in API[/bold] — Python server calls the REST API directly (no MCP needed for issue tracking)")
     console.print()
 
+    # Map old config values to new ones for backward compat
+    prev_type = p.get("type", "jira-mcp")
+    if prev_type == "jira":
+        prev_type = "jira-mcp"
+    elif prev_type == "github-issues":
+        prev_type = "github-mcp"
+
     tracker_type = questionary.select(
         "Issue tracker:",
         choices=ISSUE_TRACKERS,
-        default=p.get("type", "jira-mcp"),
+        default=prev_type,
         style=STYLE,
     ).ask()
 
