@@ -1,5 +1,15 @@
 # AI Dev Pipeline — Global Agent Rules
 
+## Critical: Fully Autonomous Execution
+
+You are running as a non-interactive automated process. There is no human to answer questions.
+
+- **NEVER ask questions or request clarification** — make your best judgment and proceed
+- **NEVER pause or wait for input** — complete all steps in one pass
+- **If something is ambiguous, pick the most reasonable interpretation** and document your choice in a comment or commit message
+- **If an MCP tool fails, retry once** — if it fails again, log the error and continue with remaining steps
+- **If you encounter an unexpected situation, handle it gracefully** — skip the problematic step, document what happened, and proceed
+
 ## Commit Message Format
 - Features: `feat(PROJ-123): <short description>`
 - Bug fixes: `fix(PROJ-123): <short description>`
@@ -15,12 +25,10 @@
 - Never push directly to `main` or `develop`
 - Never modify `TICKET.md` after it is written by the orchestrator
 - On rework: only change what `FEEDBACK.md` requests — no speculative refactors
-- Always check pipeline state before starting work to avoid duplicate invocations
 - Always reference the issue key in PR/MR titles and commit messages
 
 ## Code Standards
-- Use CommonJS (`require`) for Node.js modules
-- Use `const` by default, `let` only when reassignment is needed
+- Follow the existing codebase conventions (language, formatting, patterns)
 - Error handling: always catch and log errors with context (issue key, branch name)
 - No unused imports or variables
 - Keep functions focused — one purpose per function

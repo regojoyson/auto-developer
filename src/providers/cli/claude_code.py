@@ -12,7 +12,12 @@ class ClaudeCodeAdapter(CliAdapterBase):
     rules_file_name = "CLAUDE.md"
 
     def build_args(self, agent_name, input_text, config):
-        args = ["--agent", agent_name, "--print", "--input", input_text]
+        args = [
+            "--agent", agent_name,
+            "--print",                  # non-interactive output mode
+            "--dangerously-skip-permissions",  # auto-approve all tool calls
+            "--input", input_text,
+        ]
         if config.get("model"):
             args.extend(["--model", config["model"]])
         if config.get("max_turns"):

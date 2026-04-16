@@ -13,7 +13,10 @@ class GeminiAdapter(CliAdapterBase):
 
     def build_args(self, agent_name, input_text, config):
         prompt = f"[Agent: {agent_name}]\n{input_text}"
-        args = ["--prompt", prompt]
+        args = [
+            "--prompt", prompt,
+            "--auto-approve",           # auto-approve all actions
+        ]
         if config.get("model"):
             args.extend(["--model", config["model"]])
         args.extend(config.get("extra_args") or [])

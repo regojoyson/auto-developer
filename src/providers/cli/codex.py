@@ -13,7 +13,10 @@ class CodexAdapter(CliAdapterBase):
 
     def build_args(self, agent_name, input_text, config):
         prompt = f"[Agent: {agent_name}]\n{input_text}"
-        args = ["--prompt", prompt, "--full-auto"]
+        args = [
+            "--prompt", prompt,
+            "--full-auto",              # auto-approve all actions
+        ]
         if config.get("model"):
             args.extend(["--model", config["model"]])
         args.extend(config.get("extra_args") or [])
