@@ -1,4 +1,24 @@
-"""Unified configuration loader — reads config.yaml once, exports typed config."""
+"""
+Unified configuration loader.
+
+Reads config.yaml once on first import and caches the result as a module-level
+dict. Every other module in the pipeline imports from here:
+
+    from src.config import config
+    print(config["repo"]["mode"])       # 'dir', 'parentDir', or 'clone'
+    print(config["git_provider"]["type"])  # 'gitlab' or 'github'
+
+The config dict has these top-level keys:
+    - repo           — repo mode, path, baseBranch, clone URLs
+    - issue_tracker  — type, triggerStatus, doneStatus, botUsers
+    - git_provider   — type, botUsers
+    - cli_adapter    — type, model, timeout, command, extra_args
+    - notification   — type, channel (or None if disabled)
+    - pipeline       — port, max_rework_iterations, agent_timeout
+
+Secrets (tokens) stay in .env and are read via os.environ at runtime —
+they are NOT in this config.
+"""
 
 from pathlib import Path
 import yaml
@@ -8,7 +28,17 @@ CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
 _cache = None
 
 
-def load():
+def load() -> dict:
+    """
+    Load and parse config.yaml into a normalized dict.
+
+    Returns the cached config if already loaded. Raises FileNotFoundError
+    if config.yaml doesn't exist (user needs to run ./setup.sh first).
+
+    Returns:
+        dict with keys: repo, issue_tracker, git_provider, cli_adapter,
+        notification, pipeline.
+    """
     global _cache
     if _cache:
         return _cache
@@ -64,10 +94,12 @@ def load():
     return _cache
 
 
-def reload():
+def reload() -> dict:
+    """Clear the cached config and re-read from disk. Returns the fresh config."""
     global _cache
     _cache = None
     return load()
 
 
+# Auto-load on first import so other modules can do: from src.config import config
 config = load()

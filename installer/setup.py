@@ -1,8 +1,24 @@
 #!/usr/bin/env python3
-"""Auto Developer — Interactive TUI Setup Wizard.
+"""Auto Developer -- Interactive TUI Setup Wizard.
 
-Generates config.yaml + .env in one interactive session.
-Then symlinks agent files into target repos.
+Walks the user through a 7-step terminal-based wizard to configure the
+Auto Developer pipeline. Collects settings for the repository layout,
+issue tracker, git provider credentials, AI CLI adapter, notifications,
+and pipeline tuning parameters, then writes ``config.yaml`` and ``.env``
+files and symlinks agent definitions into the target repositories.
+
+Steps:
+    1. Repository location and base branch
+    2. Issue tracker (Jira or GitHub Issues)
+    3. Git provider and API tokens (GitLab or GitHub)
+    4. AI coding CLI selection (Claude Code, Codex, or Gemini)
+    5. Notification channel (optional Slack)
+    6. Pipeline settings (port, rework limit, timeout)
+    7. Summary and confirmation
+
+Usage::
+
+    python installer/setup.py
 """
 
 import os
@@ -11,6 +27,12 @@ from pathlib import Path
 
 import questionary
 from questionary import Style
+
+from installer.choices import (
+    REPO_MODES, ISSUE_TRACKERS, ISSUE_TRACKER_DEFAULTS,
+    GIT_PROVIDERS, GIT_PROVIDER_ENV, GIT_PROVIDER_BOTS,
+    CLI_ADAPTERS, NOTIFICATION_PROVIDERS, PIPELINE_DEFAULTS,
+)
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -39,6 +61,7 @@ ENV_PATH = PROJECT_ROOT / ".env"
 
 
 def banner():
+    """Print the setup wizard banner to the terminal."""
     console.print()
     console.print(Panel.fit(
         "[bold cyan]Auto Developer[/bold cyan]\n"
@@ -49,19 +72,34 @@ def banner():
 
 
 def step(num: int, total: int, title: str):
+    """Print a step header showing progress through the wizard.
+
+    Args:
+        num: Current step number (1-based).
+        total: Total number of steps.
+        title: Human-readable title for this step.
+    """
     console.print(f"\n  [cyan]Step {num}/{total}[/cyan] — [bold]{title}[/bold]\n")
 
 
 def ask_repo(total_steps: int) -> dict:
+    """Prompt the user for repository configuration.
+
+    Supports three modes: single local directory, parent directory with
+    multiple repos, or cloning from git URLs.
+
+    Args:
+        total_steps: Total wizard steps (for the progress header).
+
+    Returns:
+        dict: Repository config with keys ``mode``, ``baseBranch``, and
+            mode-specific keys (``path``, ``urls``/``cloneDir``).
+    """
     step(1, total_steps, "Repository")
 
     mode = questionary.select(
         "Where is your code?",
-        choices=[
-            questionary.Choice("Local directory (one repo)", value="dir"),
-            questionary.Choice("Parent directory (multiple repos)", value="parentDir"),
-            questionary.Choice("Clone from git URL(s)", value="clone"),
-        ],
+        choices=REPO_MODES,
         style=STYLE,
     ).ask()
 
@@ -95,104 +133,102 @@ def ask_repo(total_steps: int) -> dict:
 
 
 def ask_issue_tracker(total_steps: int) -> dict:
+    """Prompt the user for issue tracker configuration.
+
+    Supports Jira (trigger on status change) and GitHub Issues (trigger
+    on label application).
+
+    Args:
+        total_steps: Total wizard steps (for the progress header).
+
+    Returns:
+        dict: Issue tracker config with keys ``type``, ``triggerStatus``,
+            and ``doneStatus``.
+    """
     step(2, total_steps, "Issue Tracker")
 
     tracker_type = questionary.select(
         "Issue tracker:",
-        choices=[
-            questionary.Choice("Jira", value="jira"),
-            questionary.Choice("GitHub Issues", value="github-issues"),
-        ],
+        choices=ISSUE_TRACKERS,
         style=STYLE,
     ).ask()
 
     config = {"type": tracker_type}
+    defaults = ISSUE_TRACKER_DEFAULTS[tracker_type]
 
-    if tracker_type == "jira":
-        config["triggerStatus"] = questionary.text(
-            "Trigger status (ticket status that starts the pipeline):",
-            default="Ready for Development", style=STYLE
-        ).ask()
-        config["doneStatus"] = questionary.text(
-            "Done status (after merge):", default="Done", style=STYLE
-        ).ask()
-
-    elif tracker_type == "github-issues":
-        config["triggerStatus"] = questionary.text(
-            "Trigger label (label that starts the pipeline):",
-            default="ready-for-dev", style=STYLE
-        ).ask()
-        config["doneStatus"] = questionary.text(
-            "Done label (after merge):", default="done", style=STYLE
-        ).ask()
+    config["triggerStatus"] = questionary.text(
+        f"{defaults['trigger_label']} (starts the pipeline):",
+        default=defaults["trigger_default"], style=STYLE
+    ).ask()
+    config["doneStatus"] = questionary.text(
+        f"{defaults['done_label']} (after merge):",
+        default=defaults["done_default"], style=STYLE
+    ).ask()
 
     return config
 
 
 def ask_git_provider(total_steps: int) -> tuple[dict, dict]:
+    """Prompt the user for git provider selection and API credentials.
+
+    Collects tokens and project identifiers for either GitLab or GitHub,
+    storing sensitive values in the env vars dict (written to ``.env``).
+
+    Args:
+        total_steps: Total wizard steps (for the progress header).
+
+    Returns:
+        tuple[dict, dict]: A 2-tuple of (git_config, env_vars) where
+            *git_config* contains ``type`` and ``botUsers``, and
+            *env_vars* contains the provider-specific environment
+            variables (tokens, project IDs, etc.).
+    """
     step(3, total_steps, "Git Provider + Tokens")
 
     provider_type = questionary.select(
         "Git provider:",
-        choices=[
-            questionary.Choice("GitLab", value="gitlab"),
-            questionary.Choice("GitHub", value="github"),
-        ],
+        choices=GIT_PROVIDERS,
         style=STYLE,
     ).ask()
 
     config = {"type": provider_type}
     env_vars = {}
 
-    if provider_type == "gitlab":
-        console.print("  [dim]Enter your GitLab credentials (stored in .env)[/dim]\n")
-        env_vars["GITLAB_BASE_URL"] = questionary.text(
-            "GitLab URL:", default="https://gitlab.com", style=STYLE
-        ).ask()
-        env_vars["GITLAB_TOKEN"] = questionary.password(
-            "GitLab token (api scope):", style=STYLE
-        ).ask()
-        env_vars["GITLAB_PROJECT_ID"] = questionary.text(
-            "GitLab project ID (numeric):", style=STYLE
-        ).ask()
+    console.print(f"  [dim]Enter your {provider_type} credentials (stored in .env)[/dim]\n")
 
-        bot_users = questionary.text(
-            "Bot usernames to ignore (comma-separated):",
-            default="project_bot, ghost, ci-bot", style=STYLE
-        ).ask()
-        config["botUsers"] = [u.strip() for u in bot_users.split(",") if u.strip()]
+    # Ask for each env var defined in choices.py
+    for var_def in GIT_PROVIDER_ENV[provider_type]:
+        if var_def["secret"]:
+            value = questionary.password(f"{var_def['label']}:", style=STYLE).ask()
+        else:
+            value = questionary.text(f"{var_def['label']}:", default=var_def["default"], style=STYLE).ask()
+        env_vars[var_def["key"]] = value
 
-    elif provider_type == "github":
-        console.print("  [dim]Enter your GitHub credentials (stored in .env)[/dim]\n")
-        env_vars["GITHUB_TOKEN"] = questionary.password(
-            "GitHub token:", style=STYLE
-        ).ask()
-        env_vars["GITHUB_OWNER"] = questionary.text(
-            "GitHub owner (org or username):", style=STYLE
-        ).ask()
-        env_vars["GITHUB_REPO"] = questionary.text(
-            "GitHub repo name:", style=STYLE
-        ).ask()
-
-        bot_users = questionary.text(
-            "Bot usernames to ignore (comma-separated):",
-            default="dependabot[bot], github-actions[bot]", style=STYLE
-        ).ask()
-        config["botUsers"] = [u.strip() for u in bot_users.split(",") if u.strip()]
+    bot_users = questionary.text(
+        "Bot usernames to ignore (comma-separated):",
+        default=GIT_PROVIDER_BOTS[provider_type], style=STYLE
+    ).ask()
+    config["botUsers"] = [u.strip() for u in bot_users.split(",") if u.strip()]
 
     return config, env_vars
 
 
 def ask_cli_adapter(total_steps: int) -> dict:
+    """Prompt the user for AI coding CLI adapter selection.
+
+    Supports Claude Code, Codex, and Gemini with optional model override.
+
+    Args:
+        total_steps: Total wizard steps (for the progress header).
+
+    Returns:
+        dict: CLI adapter config with keys ``type`` and optionally ``model``.
+    """
     step(4, total_steps, "AI Coding CLI")
 
     cli_type = questionary.select(
         "AI coding CLI:",
-        choices=[
-            questionary.Choice("Claude Code", value="claude-code"),
-            questionary.Choice("Codex", value="codex"),
-            questionary.Choice("Gemini", value="gemini"),
-        ],
+        choices=CLI_ADAPTERS,
         style=STYLE,
     ).ask()
 
@@ -209,6 +245,17 @@ def ask_cli_adapter(total_steps: int) -> dict:
 
 
 def ask_notification(total_steps: int) -> dict | None:
+    """Prompt the user for notification configuration.
+
+    Notifications are optional. Currently only Slack is supported.
+
+    Args:
+        total_steps: Total wizard steps (for the progress header).
+
+    Returns:
+        dict or None: Notification config with keys ``type`` and ``channel``
+            if enabled, or None if the user declines notifications.
+    """
     step(5, total_steps, "Notifications")
 
     enable = questionary.confirm("Enable notifications?", default=False, style=STYLE).ask()
@@ -217,7 +264,7 @@ def ask_notification(total_steps: int) -> dict | None:
 
     notif_type = questionary.select(
         "Notification provider:",
-        choices=[questionary.Choice("Slack", value="slack")],
+        choices=NOTIFICATION_PROVIDERS,
         style=STYLE,
     ).ask()
 
@@ -227,11 +274,24 @@ def ask_notification(total_steps: int) -> dict | None:
 
 
 def ask_pipeline(total_steps: int) -> dict:
+    """Prompt the user for pipeline runtime settings.
+
+    Collects the server port, maximum rework iteration count, and agent
+    timeout duration.
+
+    Args:
+        total_steps: Total wizard steps (for the progress header).
+
+    Returns:
+        dict: Pipeline config with keys ``port`` (int),
+            ``maxReworkIterations`` (int), and ``agentTimeout`` (int,
+            in milliseconds).
+    """
     step(6, total_steps, "Pipeline Settings")
 
-    port = questionary.text("Server port:", default="3000", style=STYLE).ask()
-    max_rework = questionary.text("Max rework iterations:", default="3", style=STYLE).ask()
-    timeout = questionary.text("Agent timeout (seconds):", default="300", style=STYLE).ask()
+    port = questionary.text("Server port:", default=PIPELINE_DEFAULTS["port"], style=STYLE).ask()
+    max_rework = questionary.text("Max rework iterations:", default=PIPELINE_DEFAULTS["max_rework"], style=STYLE).ask()
+    timeout = questionary.text("Agent timeout (seconds):", default=PIPELINE_DEFAULTS["timeout_seconds"], style=STYLE).ask()
 
     return {
         "port": int(port),
@@ -241,6 +301,17 @@ def ask_pipeline(total_steps: int) -> dict:
 
 
 def show_summary(config: dict, env_vars: dict, total_steps: int):
+    """Display a formatted summary table of all collected configuration.
+
+    Shows repository settings, provider choices, pipeline parameters,
+    and masked environment variable values for user review before writing.
+
+    Args:
+        config: The assembled configuration dict.
+        env_vars: Environment variables to write to ``.env`` (tokens are
+            masked in the display).
+        total_steps: Total wizard steps (for the progress header).
+    """
     step(7, total_steps, "Summary")
 
     table = Table(show_header=False, box=None, padding=(0, 2))
@@ -284,6 +355,14 @@ def show_summary(config: dict, env_vars: dict, total_steps: int):
 
 
 def write_config(config: dict):
+    """Write the assembled configuration to ``config.yaml``.
+
+    Cleans up the config dict (removes empty optional fields) and writes
+    it as YAML to the project root.
+
+    Args:
+        config: The full configuration dict assembled from wizard responses.
+    """
     # Clean up config for YAML output
     yaml_config = {}
 
@@ -310,6 +389,12 @@ def write_config(config: dict):
 
 
 def write_env(env_vars: dict):
+    """Write environment variables to ``.env`` in the project root.
+
+    Args:
+        env_vars: Dict of environment variable names to values (e.g.
+            tokens, project IDs).
+    """
     lines = ["# Auto-generated by setup wizard\n"]
     for key, val in env_vars.items():
         lines.append(f"{key}={val}\n")
@@ -318,6 +403,13 @@ def write_env(env_vars: dict):
 
 
 def main():
+    """Run the interactive setup wizard.
+
+    Orchestrates the full wizard flow: checks for existing config (offers
+    to reconfigure or just re-link), collects settings through each step,
+    shows a summary for confirmation, writes config files, and symlinks
+    agent files into target repositories.
+    """
     banner()
 
     # Check for existing config

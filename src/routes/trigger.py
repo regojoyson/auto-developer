@@ -1,4 +1,17 @@
-"""POST /api/trigger — manual pipeline trigger."""
+"""Manual pipeline trigger route.
+
+Provides a ``POST /api/trigger`` endpoint that allows manually starting the
+pipeline for a given issue key without waiting for a webhook event. Useful
+for testing, retries, or triggering work on issues that have already
+transitioned past the webhook trigger status.
+
+Mount this router under ``/api/trigger`` in the FastAPI app.
+
+Example request::
+
+    POST /api/trigger
+    {"issueKey": "PROJ-123", "summary": "Add login page", "component": "frontend"}
+"""
 
 import json
 import logging
@@ -17,6 +30,17 @@ router = APIRouter()
 
 
 class TriggerRequest(BaseModel):
+    """Request body for the manual pipeline trigger endpoint.
+
+    Attributes:
+        issueKey: The issue tracker key (e.g. ``"PROJ-123"`` or
+            ``"myrepo#42"``). Required.
+        summary: Human-readable summary of the issue. Defaults to the
+            issue key if not provided.
+        component: Optional component name used to resolve which
+            repository to target in multi-repo setups.
+    """
+
     issueKey: str
     summary: str | None = None
     component: str | None = None
@@ -24,6 +48,21 @@ class TriggerRequest(BaseModel):
 
 @router.post("/")
 async def manual_trigger(body: TriggerRequest):
+    """Manually trigger the pipeline for an issue.
+
+    Creates a feature branch name from the issue key and summary, initializes
+    pipeline state, and launches the orchestrator agent in a background
+    thread.
+
+    Args:
+        body: The trigger request containing the issue key and optional
+            summary and component.
+
+    Returns:
+        dict: ``{"accepted": True, ...}`` with the issue key, branch name,
+            and repo directory if a pipeline was started. Returns an error
+            dict if a pipeline is already active for the computed branch.
+    """
     issue_key = body.issueKey
     summary = body.summary or issue_key
     component = body.component

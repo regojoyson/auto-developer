@@ -1,4 +1,16 @@
-"""POST /webhooks/git — unified git provider webhook handler."""
+"""Git provider webhook route.
+
+Provides a ``POST /webhooks/git`` endpoint that receives webhook payloads
+from the configured git provider (GitLab or GitHub). Handles three event
+types:
+
+- **approved** -- Marks the pipeline as merged and triggers post-merge actions.
+- **push** -- Logs human pushes on tracked branches.
+- **comment** -- Triggers the feedback parser agent when a review comment
+  arrives on a PR that is awaiting review, subject to rework limits.
+
+Mount this router under ``/webhooks/git`` in the FastAPI app.
+"""
 
 import json
 import logging
@@ -16,11 +28,34 @@ router = APIRouter()
 
 
 def _run_async(agent, input_data, cwd):
+    """Launch an agent in a background daemon thread.
+
+    Args:
+        agent: Name of the agent to run (e.g. ``"orchestrator"``).
+        input_data: JSON-encoded input string for the agent.
+        cwd: Working directory for the agent process.
+    """
     threading.Thread(target=run_agent, args=(agent, input_data), kwargs={"cwd": cwd}, daemon=True).start()
 
 
 @router.post("/")
 async def handle_webhook(request: Request):
+    """Handle an incoming git provider webhook.
+
+    Delegates payload parsing to the configured adapter, then dispatches
+    based on the event type: transitions state on approval, logs pushes,
+    and triggers the feedback parser on review comments (respecting the
+    configured rework iteration limit).
+
+    Args:
+        request: The incoming FastAPI request containing webhook headers
+            and JSON body.
+
+    Returns:
+        dict: ``{"received": True}`` for processed events, or
+            ``{"ignored": True}`` if the event was filtered out by the
+            adapter.
+    """
     adapter, git_config = get_git_provider()
     payload = await request.json()
     headers = dict(request.headers)

@@ -1,4 +1,13 @@
-"""POST /webhooks/issue-tracker — unified issue tracker webhook handler."""
+"""Issue tracker webhook route.
+
+Provides a ``POST /webhooks/issue-tracker`` endpoint that receives webhook
+payloads from the configured issue tracker (Jira or GitHub Issues). When a
+matching event is detected (e.g. a ticket status change to "Ready for
+Development"), the handler creates a feature branch name, initializes
+pipeline state, and launches the orchestrator agent in a background thread.
+
+Mount this router under ``/webhooks/issue-tracker`` in the FastAPI app.
+"""
 
 import json
 import logging
@@ -18,6 +27,21 @@ router = APIRouter()
 
 @router.post("/")
 async def handle_webhook(request: Request):
+    """Handle an incoming issue tracker webhook.
+
+    Delegates payload parsing to the configured adapter. If the event matches
+    the trigger criteria, creates pipeline state and spawns the orchestrator
+    agent in a background thread.
+
+    Args:
+        request: The incoming FastAPI request containing webhook headers
+            and JSON body.
+
+    Returns:
+        dict: ``{"accepted": True, ...}`` if a pipeline was started,
+            ``{"ignored": True}`` if the event was filtered out or a
+            pipeline is already active for the branch.
+    """
     adapter, tracker_config = get_issue_tracker()
     payload = await request.json()
     headers = dict(request.headers)

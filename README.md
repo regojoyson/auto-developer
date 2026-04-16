@@ -58,11 +58,21 @@ Everything is swappable via a single `config.yaml`. Add your own providers by ex
 git clone https://github.com/regojoyson/auto-developer.git
 cd auto-developer
 
-# 0. Check prerequisites first: docs/prerequisites.md
-./setup.sh     # interactive wizard — generates config
-# fill in tokens in .env
+./setup.sh     # interactive TUI wizard — configures everything
 ./start.sh     # validates, starts server, prints webhook URLs
 ```
+
+`./setup.sh` walks you through a step-by-step terminal wizard:
+
+1. Where your code is (local dir / parent dir / clone from URL)
+2. Issue tracker (Jira / GitHub Issues) + trigger status
+3. Git provider (GitLab / GitHub) + **tokens** (masked input, saved to .env)
+4. AI coding CLI (Claude Code / Codex / Gemini) + optional model
+5. Notifications (optional Slack)
+6. Pipeline settings (port, rework limit, timeout)
+7. Summary → confirm → writes `config.yaml` + `.env` + symlinks agents
+
+No manual file editing needed — the wizard handles everything including tokens.
 
 ```bash
 ./stop.sh      # stops everything, cleans up

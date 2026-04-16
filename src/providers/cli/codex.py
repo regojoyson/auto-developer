@@ -1,9 +1,25 @@
-"""Codex CLI adapter."""
+"""Codex CLI adapter.
+
+Implements the :class:`~src.providers.base.CliAdapterBase` interface for
+the Codex CLI (``codex``). Builds command-line arguments to invoke agents
+in full-auto mode and parses the resulting stdout/stderr into a normalized
+result dict.
+
+The module exposes a singleton ``adapter`` instance at module level for
+use by the CLI adapter factory.
+"""
 
 from src.providers.base import CliAdapterBase
 
 
 class CodexAdapter(CliAdapterBase):
+    """Adapter for invoking AI coding agents via the Codex CLI.
+
+    Prepends the agent name to the prompt text and uses ``--full-auto``
+    to auto-approve all actions during automated pipeline runs. Supports
+    optional model selection via config.
+    """
+
     name = "codex"
     label = "Codex CLI"
     default_command = "codex"
@@ -12,6 +28,20 @@ class CodexAdapter(CliAdapterBase):
     rules_file_name = "AGENTS.md"
 
     def build_args(self, agent_name, input_text, config):
+        """Build command-line arguments for a Codex agent invocation.
+
+        The agent name is embedded in the prompt as a ``[Agent: ...]``
+        prefix so the CLI can route to the correct agent behavior.
+
+        Args:
+            agent_name: Name of the agent to invoke (e.g. ``"orchestrator"``).
+            input_text: JSON-encoded input string to pass to the agent.
+            config: The ``cli_adapter`` section from config.yaml. Supports
+                optional keys ``model`` and ``extra_args``.
+
+        Returns:
+            list[str]: CLI argument strings suitable for subprocess execution.
+        """
         prompt = f"[Agent: {agent_name}]\n{input_text}"
         args = [
             "--prompt", prompt,
@@ -23,6 +53,17 @@ class CodexAdapter(CliAdapterBase):
         return args
 
     def parse_output(self, stdout, stderr, exit_code):
+        """Parse and normalize the Codex CLI output.
+
+        Args:
+            stdout: Standard output captured from the CLI process.
+            stderr: Standard error captured from the CLI process.
+            exit_code: Process exit code (0 indicates success).
+
+        Returns:
+            dict: A dict with keys ``success`` (bool), ``output`` (str),
+                and ``error`` (str or None).
+        """
         return {
             "success": exit_code == 0,
             "output": stdout,

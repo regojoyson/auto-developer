@@ -1,4 +1,22 @@
-"""Symlink agent files into target repos based on CLI adapter config."""
+"""Symlink agent files into target repositories.
+
+After the setup wizard generates ``config.yaml``, this module creates the
+necessary directory structure and symlinks in each target repository so the
+chosen AI CLI (Claude Code, Codex, or Gemini) can discover the agent
+definition files and rules.
+
+For each target repo, the linker:
+
+1. Symlinks ``.auto-developer/`` to the shared ``agents/`` directory.
+2. Creates the CLI-specific agent directory (e.g. ``.claude/agents/``).
+3. Symlinks each agent ``.md`` file into the agent directory.
+4. Symlinks ``RULES.md`` as the CLI-specific rules file (e.g. ``CLAUDE.md``).
+
+Usage::
+
+    from installer.linker import link_agents
+    link_agents(config)
+"""
 
 import os
 import sys
@@ -12,7 +30,17 @@ AGENTS_DIR = PROJECT_ROOT / "agents"
 
 
 def get_cli_dirs(cli_type: str) -> dict:
-    """Return agent_dir, config_dir, rules_file_name for a CLI type."""
+    """Return the directory layout for a given CLI adapter type.
+
+    Args:
+        cli_type: One of ``"claude-code"``, ``"codex"``, or ``"gemini"``.
+
+    Returns:
+        dict: A dict with keys ``agent_dir`` (relative path where the CLI
+            looks for agent files), ``config_dir`` (CLI config directory),
+            and ``rules_file`` (filename for the global rules file).
+            Defaults to Claude Code layout for unknown types.
+    """
     mapping = {
         "claude-code": {"agent_dir": ".claude/agents", "config_dir": ".claude", "rules_file": "CLAUDE.md"},
         "codex": {"agent_dir": ".codex/agents", "config_dir": ".codex", "rules_file": "AGENTS.md"},
@@ -22,7 +50,22 @@ def get_cli_dirs(cli_type: str) -> dict:
 
 
 def resolve_repo_dirs(config: dict) -> list[str]:
-    """Get list of repo directories from config."""
+    """Resolve the list of target repository directories from config.
+
+    Supports three repo modes:
+    - ``dir``: Returns a single directory path.
+    - ``parentDir``: Returns all non-hidden subdirectories.
+    - ``clone``: Constructs paths from clone URLs and target directory.
+
+    Args:
+        config: The full configuration dict. Must contain a ``repo``
+            section with a ``mode`` key.
+
+    Returns:
+        list[str]: Absolute paths to each target repository directory.
+            May be empty if no directories are found or the mode is
+            unrecognized.
+    """
     mode = config["repo"]["mode"]
 
     if mode == "dir":
@@ -43,7 +86,17 @@ def resolve_repo_dirs(config: dict) -> list[str]:
 
 
 def link_agents(config: dict) -> None:
-    """Symlink agent .md files + RULES.md into target repos."""
+    """Symlink agent definition files and rules into all target repos.
+
+    For each resolved repository directory, creates the CLI-specific
+    agent directory structure and symlinks all agent ``.md`` files plus
+    the global rules file. Skips files that already exist as symlinks
+    or regular files to avoid overwriting manual customizations.
+
+    Args:
+        config: The full configuration dict. Must contain ``cliAdapter``
+            (with ``type``) and ``repo`` sections.
+    """
     cli_type = config.get("cliAdapter", {}).get("type", "claude-code")
     dirs = get_cli_dirs(cli_type)
     repo_dirs = resolve_repo_dirs(config)
