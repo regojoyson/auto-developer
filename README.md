@@ -6,7 +6,9 @@ An open-source pipeline that automates the full development lifecycle. When a ti
 
 No manual handoffs. No copy-pasting tickets into prompts. Just move a ticket to "Ready for Development" and the code shows up as a PR.
 
-## Architecture
+---
+
+## How It Works
 
 <p align="center">
   <img src="docs/architecture.svg" alt="Auto Developer Architecture" width="800"/>
@@ -22,7 +24,31 @@ No manual handoffs. No copy-pasting tickets into prompts. Just move a ticket to 
 - **Feedback parser** structures the review comments, developer agent applies fixes
 - Loop until approved or rework limit hit (then escalate)
 
-**Everything is pluggable** — swap issue trackers (Jira, GitHub Issues), git providers (GitLab, GitHub), AI CLIs (Claude Code, Codex, Gemini), and notification channels (Slack) via a single `config.yaml`.
+---
+
+## Review Loop
+
+<p align="center">
+  <img src="docs/review-loop.svg" alt="Review Loop" width="700"/>
+</p>
+
+After the PR is created, the pipeline pauses and waits for the human reviewer. Three outcomes:
+
+| Action | What happens |
+|--------|-------------|
+| **Approve** | PR merged, ticket closed, team notified |
+| **Push edits** | Pipeline detects human commits, waits for approval |
+| **Comment feedback** | Feedback parser + developer rework cycle (max 3 rounds) |
+
+---
+
+## Pluggable Providers
+
+<p align="center">
+  <img src="docs/providers.svg" alt="Pluggable Providers" width="750"/>
+</p>
+
+Everything is swappable via a single `config.yaml`. Add your own providers by extending a base class — see [Custom Providers Guide](docs/custom-providers.md).
 
 ---
 
@@ -48,21 +74,10 @@ curl -X POST http://localhost:3000/api/trigger \
   -d '{"issueKey": "PROJ-42", "summary": "Add login page"}'
 ```
 
----
-
-## What It Supports
-
-Everything is pluggable via `config.yaml`:
-
-| Layer | Supported | Add your own? |
-|-------|-----------|---------------|
-| Issue Tracker | Jira, GitHub Issues | Yes — extend `IssueTrackerBase` |
-| Git Provider | GitLab, GitHub | Yes — extend `GitProviderBase` |
-| AI Coding CLI | Claude Code, Codex, Gemini | Yes — extend `CliAdapterBase` |
-| Notifications | Slack (optional) | Yes — extend `NotificationBase` |
-| Repo Mode | Local dir, parent dir, clone from URL | Via config |
-
----
+Check pipeline status:
+```bash
+curl http://localhost:3000/api/status/PROJ-42
+```
 
 ---
 
@@ -75,6 +90,7 @@ Everything is pluggable via `config.yaml`:
 | **[Configuration](docs/configuration.md)** | All `config.yaml` options with examples |
 | **[API Spec](docs/api-spec.md)** | Every HTTP endpoint, request/response formats |
 | **[OpenAPI Spec](docs/openapi.yaml)** | Import into Postman, Swagger UI, or any API tool |
+| **[Custom Providers](docs/custom-providers.md)** | Add your own issue tracker, git provider, CLI, or notification |
 | **[Spec Document](docs/spec.md)** | Architecture, agent contracts, risks |
 
 ---
@@ -83,62 +99,24 @@ Everything is pluggable via `config.yaml`:
 
 ```
 auto-developer/
-├── .claude/
-│   ├── agents/                  # Agent prompts (orchestrator, brainstorm, developer, feedback-parser)
-│   ├── CLAUDE.md                # Global rules for all agents
-│   └── settings.json            # MCP server config (auto-generated)
+├── .claude/agents/              # Agent prompts (orchestrator, brainstorm, developer, feedback-parser)
 ├── src/
 │   ├── config.js                # Unified config loader (reads config.yaml)
-│   ├── webhook/                 # Express server + route handlers
-│   │   ├── server.js
-│   │   └── routes/
-│   │       ├── issue-tracker.js # Issue tracker webhooks
-│   │       ├── git-provider.js  # Git provider webhooks
-│   │       ├── trigger.js       # Manual trigger API
-│   │       └── status.js        # Pipeline status API
+│   ├── webhook/routes/          # issue-tracker, git-provider, trigger, status
 │   ├── providers/               # Pluggable adapters
-│   │   ├── base/                # Abstract base classes
+│   │   ├── base/                # Abstract base classes (4 types)
 │   │   ├── trackers/            # Jira, GitHub Issues
 │   │   ├── git/                 # GitLab, GitHub
 │   │   ├── cli/                 # Claude Code, Codex, Gemini
 │   │   └── notifications/       # Slack
 │   ├── state/manager.js         # Pipeline state machine
-│   ├── repos/resolver.js        # Repo directory resolver (3 modes)
 │   └── agents/runner.js         # CLI process spawner
-├── mcp-servers/
-│   ├── gitlab/                  # GitLab MCP server (8 tools)
-│   └── github/                  # GitHub MCP server (8 tools)
-├── docs/                        # All documentation
+├── mcp-servers/                 # GitLab + GitHub MCP servers (8 tools each)
+├── docs/                        # All documentation + diagrams
 ├── config.yaml                  # Single config file
-├── .env                         # Secrets (tokens only)
-├── setup.sh / start.sh / stop.sh
-└── package.json
+├── .env                         # Secrets only (tokens)
+└── setup.sh / start.sh / stop.sh
 ```
-
----
-
-## Adding Custom Providers
-
-All adapters extend a base class. To add a new one:
-
-1. Create a file in the right `src/providers/` subdirectory
-2. Extend the base class and implement the required methods
-3. Add a `case` in the factory file
-
-Example — adding Linear as an issue tracker:
-
-```js
-const { IssueTrackerBase } = require('../base/issue-tracker-base');
-
-class LinearAdapter extends IssueTrackerBase {
-  get name() { return 'linear'; }
-  get eventLabel() { return 'issue'; }
-  parseWebhook(headers, payload, config) { /* ... */ }
-}
-module.exports = new LinearAdapter();
-```
-
-Base classes validate at startup — missing methods throw immediately.
 
 ---
 
