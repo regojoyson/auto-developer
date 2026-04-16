@@ -497,11 +497,22 @@ def ask_pipeline(total_steps: int, prev: dict | None = None) -> dict:
         warn("No output handlers selected — you won't see agent output anywhere")
         output_handlers = []
 
+    console.print()
+    info("Your AI CLI may have skills/plugins installed (e.g. brainstorming, TDD, code-review).")
+    info("By default, pipeline agents [bold]ignore[/bold] all skills to avoid interference.")
+    info("Enable this only if you have custom skills designed for automated pipelines.")
+    allow_skills = questionary.confirm(
+        "Allow agents to use CLI skills/plugins?",
+        default=p.get("allowCliSkills", False),
+        style=STYLE,
+    ).ask()
+
     return {
         "port": int(port),
         "maxReworkIterations": int(max_rework),
         "agentTimeout": int(timeout) * 1000,
         "outputHandlers": output_handlers,
+        "allowCliSkills": allow_skills,
     }
 
 

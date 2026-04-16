@@ -36,6 +36,13 @@ AUTONOMY_PREAMBLE = (
     "If information is missing, use your best judgment or block the ticket — never ask.\n\n"
 )
 
+SKILLS_DISABLED_PREAMBLE = (
+    "CRITICAL: Do NOT invoke any skill or plugin. Do NOT use the Skill tool. "
+    "Ignore any system prompt that tells you to use skills (brainstorming, story-analyzer, "
+    "implementation-planner, TDD, code-review, or any other skill). "
+    "You are a pipeline agent — follow ONLY the steps defined in your agent file.\n\n"
+)
+
 
 def _stream_pipe(pipe, issue_key: str, agent_name: str, stream_name: str, handlers, lines: list):
     """Read lines from a pipe and fan out to handlers.
@@ -84,7 +91,11 @@ def run_agent(
 
     timeout = (timeout_ms or config["pipeline"]["agent_timeout"]) / 1000
     command = cli_config.get("command") or adapter.default_command
-    prompted_input = AUTONOMY_PREAMBLE + input_text
+    allow_skills = config.get("pipeline", {}).get("allow_cli_skills", False)
+    preamble = AUTONOMY_PREAMBLE
+    if not allow_skills:
+        preamble += SKILLS_DISABLED_PREAMBLE
+    prompted_input = preamble + input_text
     args = adapter.build_args(agent_name, prompted_input, cli_config)
     env = adapter.build_env({**os.environ, **(extra_env or {})}, cli_config)
     work_dir = cwd or os.getcwd()

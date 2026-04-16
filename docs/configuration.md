@@ -229,12 +229,14 @@ notification:
 | `agentTimeout` | number | No | `300000` | Default agent process timeout in ms (5 min) |
 | `port` | number | No | `3000` | Webhook server port |
 | `outputHandlers` | string[] | No | `[file, memory]` | Where to stream agent output |
+| `allowCliSkills` | boolean | No | `false` | Allow agents to use CLI skills/plugins. When false (default), agents ignore all skills to avoid interference with pipeline execution. |
 
 ```yaml
 pipeline:
   maxReworkIterations: 3
   agentTimeout: 300000
   port: 3000
+  allowCliSkills: false    # set true only if you have pipeline-compatible skills
   outputHandlers:
     - file      # writes to logs/agents/{issueKey}-{agent}.log (tail -f)
     - memory    # serves via GET /api/status/{issueKey}/logs

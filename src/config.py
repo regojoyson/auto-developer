@@ -122,6 +122,7 @@ def load() -> dict:
             "agent_timeout": raw.get("pipeline", {}).get("agentTimeout", 300000),
             "port": raw.get("pipeline", {}).get("port", 3000),
             "output_handlers": raw.get("pipeline", {}).get("outputHandlers", ["file", "memory"]),
+            "allow_cli_skills": raw.get("pipeline", {}).get("allowCliSkills", False),
         },
     }
     return _cache
