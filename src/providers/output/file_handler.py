@@ -52,6 +52,25 @@ class FileHandler(OutputHandlerBase):
             f.flush()
             f.close()
 
+    def delete_logs(self, issue_key):
+        """Delete all log files for an issue.
+
+        Closes any open file handles first, then removes matching log files.
+
+        Args:
+            issue_key: Ticket identifier (e.g. "PROJ-123").
+        """
+        # Close any open handles for this issue
+        keys_to_close = [k for k in self._files if k.startswith(f"{issue_key}-")]
+        for key in keys_to_close:
+            f = self._files.pop(key, None)
+            if f:
+                f.close()
+
+        # Delete matching log files
+        for path in LOG_DIR.glob(f"{issue_key}-*.log"):
+            path.unlink(missing_ok=True)
+
     def get_output(self, issue_key, agent_name=None):
         """Read the log file contents."""
         if agent_name:

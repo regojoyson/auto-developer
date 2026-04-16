@@ -81,6 +81,8 @@ async def cancel_pipeline(issue_key: str):
     """
     deleted = delete_state_by_issue_key(issue_key)
     if deleted:
-        logger.info(f"Pipeline cancelled: {issue_key}")
-        return {"cancelled": True, "issueKey": issue_key}
+        handlers = get_output_handlers()
+        handlers.delete_logs(issue_key)
+        logger.info(f"Pipeline cancelled and logs deleted: {issue_key}")
+        return {"cancelled": True, "issueKey": issue_key, "logsDeleted": True}
     return {"error": "Pipeline not found", "issueKey": issue_key}

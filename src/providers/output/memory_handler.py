@@ -59,6 +59,14 @@ class MemoryHandler(OutputHandlerBase):
             output.extend(lines)
         return "\n".join(output)
 
+    def delete_logs(self, issue_key: str):
+        """Delete all buffered output for an issue.
+
+        Args:
+            issue_key: Ticket identifier to clear.
+        """
+        self._buffers.pop(issue_key, None)
+
     def clear(self, issue_key: str):
         """Free memory for a completed pipeline.
 

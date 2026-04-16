@@ -50,6 +50,14 @@ class OutputHandlerRegistry:
             except Exception:
                 pass
 
+    def delete_logs(self, issue_key: str):
+        """Delete all logs for an issue from every handler."""
+        for h in self._handlers:
+            try:
+                h.delete_logs(issue_key)
+            except Exception:
+                pass
+
     def get_output(self, issue_key: str, agent_name: str | None = None) -> str:
         """Get output from the first handler that has it (typically memory)."""
         for h in self._handlers:

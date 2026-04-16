@@ -288,6 +288,17 @@ class OutputHandlerBase(ABC):
         """
         return ""
 
+    def delete_logs(self, issue_key: str) -> None:
+        """Delete all stored output for an issue.
+
+        Called when a pipeline is cancelled. Subclasses should clean up
+        any persisted data (files, buffers, etc.) for the given issue.
+
+        Args:
+            issue_key: Ticket identifier (e.g. "PROJ-123").
+        """
+        pass
+
 
 class NotificationBase(ABC):
     """Base class for notification adapters.
