@@ -174,6 +174,31 @@ curl http://localhost:3000/api/status/PROJ-42
 
 ---
 
+## Monitoring
+
+<p align="center">
+  <img src="monitoring.svg" alt="Monitoring — Real-time Agent Visibility" width="700"/>
+</p>
+
+While agents run, their output streams in real-time to pluggable output handlers:
+
+| Method | Command |
+|--------|---------|
+| **Log files** | `tail -f logs/agents/PROJ-42-orchestrator.log` |
+| **API** | `curl http://localhost:3000/api/status/PROJ-42/logs` |
+| **API (one agent)** | `curl http://localhost:3000/api/status/PROJ-42/logs?agent=brainstorm` |
+| **Server log** | `tail -f logs/server.log` |
+
+Configure which handlers are active in `config.yaml`:
+```yaml
+pipeline:
+  outputHandlers:
+    - file      # logs/agents/ — tail -f
+    - memory    # API — /api/status/{key}/logs
+```
+
+---
+
 ## Artifacts
 
 Each ticket produces three markdown files on the feature branch:

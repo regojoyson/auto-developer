@@ -144,13 +144,4 @@
 
   <!-- Pluggable label -->
   <text x="695" y="210" text-anchor="middle" font-size="10" fill="#9ca3af" font-style="italic">All providers are pluggable</text>
-
-  <!-- ═══ Monitoring / Logs ═══ -->
-  <rect x="630" y="220" width="130" height="60" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
-  <text x="695" y="242" text-anchor="middle" font-weight="600" fill="#92400e">Output</text>
-  <text x="695" y="258" text-anchor="middle" font-size="10" fill="#b45309">Log files + API</text>
-  <text x="695" y="272" text-anchor="middle" font-size="9" fill="#b45309" font-style="italic">tail -f / /api/status/logs</text>
-
-  <!-- Arrow from agents to logs -->
-  <line x1="565" y1="240" x2="628" y2="240" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4,3"/>
 </svg>
