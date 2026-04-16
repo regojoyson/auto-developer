@@ -88,7 +88,9 @@ Repos are cloned on first use and reused after. The pipeline pulls latest before
 |-------|------|----------|---------|-------------|
 | `type` | string | Yes | `jira` | `jira` or `github-issues` |
 | `triggerStatus` | string | No | `Ready for Development` | Status/label that triggers the pipeline |
+| `developmentStatus` | string | No | `Development` | Status to transition to when pipeline picks up a ticket |
 | `doneStatus` | string | No | `Done` | Status to transition to after merge |
+| `blockedStatus` | string | No | `Blocked` | Status to transition to when ticket lacks info |
 | `botUsers` | string[] | No | `[]` | Usernames to ignore in webhooks |
 
 ```yaml
@@ -96,7 +98,9 @@ Repos are cloned on first use and reused after. The pipeline pulls latest before
 issueTracker:
   type: jira
   triggerStatus: Ready for Development
+  developmentStatus: Development
   doneStatus: Done
+  blockedStatus: Blocked
 
 # GitHub Issues (trigger on label)
 issueTracker:
