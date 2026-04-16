@@ -23,6 +23,19 @@ from src.providers.output_handler import get_output_handlers
 
 logger = logging.getLogger(__name__)
 
+# Prepended to every agent prompt to enforce non-interactive behavior.
+# This lives in the user-message (prompt) position — models treat this
+# with higher priority than agent-file or system-prompt instructions.
+AUTONOMY_PREAMBLE = (
+    "IMPORTANT: You are a fully automated CI agent. There is NO human on the other end. "
+    "Nobody will read your output or reply to questions. "
+    "Do NOT use AskUserQuestion or any interactive tool. "
+    "Do NOT write questions, ask for confirmation, or present options. "
+    "Do NOT say 'before I proceed', 'should I', 'is that correct', or 'two questions'. "
+    "Make every decision yourself and execute all steps autonomously. "
+    "If information is missing, use your best judgment or block the ticket — never ask.\n\n"
+)
+
 
 def _stream_pipe(pipe, issue_key: str, agent_name: str, stream_name: str, handlers, lines: list):
     """Read lines from a pipe and fan out to handlers.
@@ -71,7 +84,8 @@ def run_agent(
 
     timeout = (timeout_ms or cli_config.get("timeout") or config["pipeline"]["agent_timeout"]) / 1000
     command = cli_config.get("command") or adapter.default_command
-    args = adapter.build_args(agent_name, input_text, cli_config)
+    prompted_input = AUTONOMY_PREAMBLE + input_text
+    args = adapter.build_args(agent_name, prompted_input, cli_config)
     env = adapter.build_env({**os.environ, **(extra_env or {})}, cli_config)
     work_dir = cwd or os.getcwd()
 
