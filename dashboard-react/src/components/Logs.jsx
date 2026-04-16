@@ -49,17 +49,22 @@ export default function Logs() {
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-bold">Logs: {issueKey}</h2>
         <div className="flex items-center gap-3">
-          <label className="text-sm text-gray-600">Agent:</label>
+          <label className="text-sm text-gray-600">Filter:</label>
           <select
             value={agent}
             onChange={(e) => setAgent(e.target.value)}
             className="border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
-            <option value="all">All</option>
-            <option value="orchestrator">orchestrator</option>
-            <option value="brainstorm">brainstorm</option>
-            <option value="developer">developer</option>
-            <option value="feedback-parser">feedback-parser</option>
+            <option value="all">All Phases</option>
+            <optgroup label="Pipeline Phases">
+              <option value="orchestrator">Phase 1 — Analyze</option>
+              <option value="orchestrator:plan">Phase 2 — Plan</option>
+              <option value="orchestrator:implement">Phase 3 — Implement</option>
+            </optgroup>
+            <optgroup label="Rework">
+              <option value="feedback-parser">Feedback Parser</option>
+              <option value="orchestrator:rework">Rework — Apply Fixes</option>
+            </optgroup>
           </select>
         </div>
       </div>
@@ -67,7 +72,7 @@ export default function Logs() {
         {logOutput}
       </div>
       <p className="text-xs text-gray-400 mt-2">
-        {logMeta.lines} lines | Agent: {logMeta.agent}
+        {logMeta.lines} lines | Filter: {logMeta.agent === 'all' ? 'All Phases' : logMeta.agent}
       </p>
     </>
   );

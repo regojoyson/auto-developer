@@ -76,35 +76,42 @@ Fields: `issueKey`, `branch`, `statuses`
 Fields: `issueKey`, `branch`, `summary`, `baseBranch`, `statuses`
 
 **Steps:**
-1. Invoke the **developer** agent with `issueKey`, `branch`, and `mode: "first-pass"`
-2. After the developer agent completes, verify commits were pushed to the feature branch
-3. Create a pull/merge request via the git provider MCP:
+1. Checkout the feature branch: `git checkout {branch}`
+2. Invoke the **developer** agent with `issueKey`, `branch`, and `mode: "first-pass"`
+3. After the developer agent completes, **push the branch to remote**: `git push origin {branch}`
+   - This is CRITICAL — the MR/PR cannot be created without pushed commits
+   - If push fails, retry once. If it still fails, output the error in __PIPELINE_RESULT__
+4. Verify commits exist on the remote branch
+5. Create a pull/merge request via the git provider MCP:
    - Title: `feat({issueKey}): {summary}`
    - Description: include a summary of PLAN.md, link to the ticket, and the file change list
    - Target branch: use `baseBranch` from input
-4. Post a comment on the ticket with the MR/PR link
-5. Send a Slack notification to the configured channel: "MR created for {issueKey} — {MR link}"
-6. Output `__PIPELINE_RESULT__:{"blocked":false}`
+6. Post a comment on the ticket with the MR/PR link
+7. Send a Slack notification to the configured channel: "MR created for {issueKey} — {MR link}"
+8. Output `__PIPELINE_RESULT__:{"blocked":false}`
 
 ### Action: rework
 
 Fields: `issueKey`, `branch`, `statuses`
 
 **Steps:**
-1. Read `FEEDBACK.md` from the branch root (written by the feedback-parser agent)
-2. Invoke the **developer** agent with `issueKey`, `branch`, and `mode: "rework"`
-3. After the developer agent completes, verify commits were pushed
-4. Post a Jira comment: "Rework completed based on review feedback"
-5. Output `__PIPELINE_RESULT__:{"blocked":false}`
+1. Checkout the feature branch: `git checkout {branch}`
+2. Read `FEEDBACK.md` from the branch root (written by the feedback-parser agent)
+3. Invoke the **developer** agent with `issueKey`, `branch`, and `mode: "rework"`
+4. After the developer agent completes, **push the branch to remote**: `git push origin {branch}`
+5. Post a comment on the ticket: "Rework completed based on review feedback"
+6. Output `__PIPELINE_RESULT__:{"blocked":false}`
 
 ### Action: merge-approved
 
 Fields: `issueKey`, `branch`, `prId`, `statuses`
 
 **Steps:**
-1. Transition the ticket to the done status (use `statuses.done` from your input JSON to find the correct transition)
+1. Post a comment on the ticket: "{issueKey} merged successfully"
 2. Send a Slack notification: "{issueKey} merged successfully"
 3. Output `__PIPELINE_RESULT__:{"blocked":false}`
+
+Note: Ticket status transition to Done is handled by the Python pipeline server — do NOT transition status here.
 
 ### Action: rework-limit-exceeded
 
@@ -120,9 +127,11 @@ Fields: `issueKey`, `branch`, `reworkCount`
 - Always follow the branch naming convention
 - Never push directly to main or develop
 - **STRICT: Never ask questions, never wait for input, never use interactive tools — you are fully autonomous**
-- Always fetch ALL Jira fields (including custom fields and attachments) — never rely on description alone
+- Always fetch ALL issue tracker fields (including custom fields and attachments) — never rely on description alone
 - Block tickets with insufficient details rather than guessing wildly
 - **All decisions are self-driven and auto-approved** — never present options and wait for selection. You choose the best path and execute it.
 - **ALWAYS output a __PIPELINE_RESULT__ line at the end of every action** — the pipeline depends on it.
+- **DO NOT transition ticket status** (e.g. to Development, Done, Blocked) — the Python pipeline server handles all status transitions automatically. You only post comments and create branches/MRs.
+- **DO push the branch** after committing code — use `git push origin <branch>` to ensure commits are on the remote before creating MR/PR.
 
 **If any step fails:** log the error, skip to the next step, and continue. Do not stop the pipeline. Still output the __PIPELINE_RESULT__ line at the end.
