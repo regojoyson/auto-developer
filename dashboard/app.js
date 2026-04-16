@@ -13,13 +13,13 @@ const api = {
         const res = await fetch(`${API_BASE}${path}`, opts);
         return res.json();
     },
-    listPipelines()          { return this.request('GET', '/api/status'); },
+    listPipelines()          { return this.request('GET', '/api/status/'); },
     getPipeline(key)         { return this.request('GET', `/api/status/${encodeURIComponent(key)}`); },
     getLogs(key, agent)      {
         const q = agent && agent !== 'all' ? `?agent=${encodeURIComponent(agent)}` : '';
         return this.request('GET', `/api/status/${encodeURIComponent(key)}/logs${q}`);
     },
-    trigger(data)            { return this.request('POST', '/api/trigger', data); },
+    trigger(data)            { return this.request('POST', '/api/trigger/', data); },
     cancel(key)              { return this.request('DELETE', `/api/status/${encodeURIComponent(key)}`); },
 };
 
