@@ -20,6 +20,8 @@ config.yaml
 .codex/
 .gemini/
 
+# Logs
+logs/
+
 # OS
 .DS_Store
-*.log

@@ -14,16 +14,24 @@ Endpoints:
 """
 
 import logging
+from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
 # Load .env before anything else reads os.environ
 load_dotenv()
 
-# Configure logging for the entire application
+# Configure logging — writes to both terminal AND logs/server.log
+LOG_DIR = Path(__file__).parent.parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] [%(levelname)s] %(name)s — %(message)s",
+    handlers=[
+        logging.StreamHandler(),                            # terminal
+        logging.FileHandler(LOG_DIR / "server.log"),        # file
+    ],
 )
 
 from src.config import config

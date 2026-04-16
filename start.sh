@@ -153,6 +153,7 @@ echo -e "    Git provider:   ${CYAN}http://<your-host>:${PORT}/webhooks/git${NC}
 echo -e "    Manual trigger: ${CYAN}http://<your-host>:${PORT}/api/trigger${NC}"
 echo -e "    Status:         ${CYAN}http://<your-host>:${PORT}/api/status${NC}"
 echo ""
+echo -e "  Logs:   ${CYAN}tail -f logs/server.log${NC}"
 echo -e "  Health: ${CYAN}curl http://localhost:${PORT}/health${NC}"
 echo -e "  Press ${YELLOW}Ctrl+C${NC} to stop"
 echo ""
