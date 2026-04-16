@@ -106,6 +106,27 @@ tail -f logs/agents/PROJ-42-orchestrator.log
 
 ---
 
+## Dashboard (Optional)
+
+A React-based web dashboard for monitoring and triggering pipelines. Requires the API server to be running on port 3000.
+
+```bash
+cd dashboard-react
+npm install        # first time only
+npm run dev        # starts on http://localhost:3001
+```
+
+To stop the dashboard:
+```bash
+# Press Ctrl+C in the terminal running the dashboard
+# Or kill the process:
+lsof -ti:3001 | xargs kill
+```
+
+Features: live pipeline list with auto-refresh, pipeline detail view, real-time log viewer with agent filtering, and a trigger form.
+
+---
+
 ## Documentation
 
 | Doc | What it covers |
@@ -144,6 +165,7 @@ auto-developer/
 │   ├── state/manager.py         # Pipeline state machine
 │   ├── repos/resolver.py        # Repo resolver (3 modes)
 │   └── executor/runner.py       # Spawns AI coding CLI processes
+├── dashboard-react/             # Optional React dashboard (port 3001)
 ├── mcp_servers/                 # GitLab + GitHub MCP servers (Python)
 ├── docs/                        # All documentation + diagrams
 ├── requirements.txt             # Python dependencies
