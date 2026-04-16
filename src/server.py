@@ -17,6 +17,7 @@ import logging
 from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 # Load .env before anything else reads os.environ
 load_dotenv()
@@ -38,6 +39,13 @@ from src.config import config
 from src.routes import issue_tracker, git_provider, trigger, status
 
 app = FastAPI(title="Auto Developer", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Register route modules
 app.include_router(issue_tracker.router, prefix="/webhooks/issue-tracker")
