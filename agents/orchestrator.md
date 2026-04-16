@@ -87,8 +87,7 @@ Fields: `issueKey`, `branch`, `summary`, `baseBranch`, `statuses`
    - Description: include a summary of PLAN.md, link to the ticket, and the file change list
    - Target branch: use `baseBranch` from input
 6. Post a comment on the ticket with the MR/PR link
-7. Send a Slack notification to the configured channel: "MR created for {issueKey} — {MR link}"
-8. Output `__PIPELINE_RESULT__:{"blocked":false}`
+7. Output `__PIPELINE_RESULT__:{"blocked":false}`
 
 ### Action: rework
 
@@ -108,19 +107,19 @@ Fields: `issueKey`, `branch`, `prId`, `statuses`
 
 **Steps:**
 1. Post a comment on the ticket: "{issueKey} merged successfully"
-2. Send a Slack notification: "{issueKey} merged successfully"
-3. Output `__PIPELINE_RESULT__:{"blocked":false}`
+2. Output `__PIPELINE_RESULT__:{"blocked":false}`
 
-Note: Ticket status transition to Done is handled by the Python pipeline server — do NOT transition status here.
+Note: Ticket status transition and Slack notification are handled by the Python pipeline server — do NOT do them here.
 
 ### Action: rework-limit-exceeded
 
 Fields: `issueKey`, `branch`, `reworkCount`
 
 **Steps:**
-1. Send a Slack notification: "{issueKey} has exceeded the rework limit ({reworkCount} iterations) — human intervention needed"
-2. Post a comment on the ticket noting the escalation
-3. Output `__PIPELINE_RESULT__:{"blocked":false}`
+1. Post a comment on the ticket noting the escalation: "{issueKey} has exceeded the rework limit ({reworkCount} iterations) — human intervention needed"
+2. Output `__PIPELINE_RESULT__:{"blocked":false}`
+
+Note: Slack escalation notification is handled by the Python pipeline server.
 
 ## Rules
 - Always follow the commit message format in the global rules
@@ -132,6 +131,7 @@ Fields: `issueKey`, `branch`, `reworkCount`
 - **All decisions are self-driven and auto-approved** — never present options and wait for selection. You choose the best path and execute it.
 - **ALWAYS output a __PIPELINE_RESULT__ line at the end of every action** — the pipeline depends on it.
 - **DO NOT transition ticket status** (e.g. to Development, Done, Blocked) — the Python pipeline server handles all status transitions automatically. You only post comments and create branches/MRs.
+- **DO NOT send Slack notifications** — the Python pipeline server sends notifications only when Slack is enabled in config. You only post comments on the ticket.
 - **DO push the branch** after committing code — use `git push origin <branch>` to ensure commits are on the remote before creating MR/PR.
 
 **If any step fails:** log the error, skip to the next step, and continue. Do not stop the pipeline. Still output the __PIPELINE_RESULT__ line at the end.
