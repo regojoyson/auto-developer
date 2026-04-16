@@ -15,7 +15,11 @@ Usage::
     print(handlers.get_output("PROJ-42"))
 """
 
+import logging
+
 from src.config import config
+
+logger = logging.getLogger(__name__)
 
 _instance = None
 
@@ -31,32 +35,32 @@ class OutputHandlerRegistry:
         for h in self._handlers:
             try:
                 h.on_start(issue_key, agent_name, cwd)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Output handler {h.name} error: {e}")
 
     def on_output(self, issue_key: str, agent_name: str, line: str, stream: str):
         """Send a line of output to all handlers."""
         for h in self._handlers:
             try:
                 h.on_output(issue_key, agent_name, line, stream)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Output handler {h.name} error: {e}")
 
     def on_finish(self, issue_key: str, agent_name: str, exit_code: int):
         """Notify all handlers that an agent finished."""
         for h in self._handlers:
             try:
                 h.on_finish(issue_key, agent_name, exit_code)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Output handler {h.name} error: {e}")
 
     def delete_logs(self, issue_key: str):
         """Delete all logs for an issue from every handler."""
         for h in self._handlers:
             try:
                 h.delete_logs(issue_key)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Output handler {h.name} error: {e}")
 
     def get_output(self, issue_key: str, agent_name: str | None = None) -> str:
         """Get output from the first handler that has it (typically memory)."""
