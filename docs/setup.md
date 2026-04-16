@@ -81,15 +81,14 @@ Edit `.env` — only secrets go here:
 ```bash
 GITLAB_BASE_URL=https://gitlab.com
 GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
-GITLAB_PROJECT_ID=12345
 ```
 
 **For GitHub:**
 ```bash
 GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
-GITHUB_OWNER=my-org
-GITHUB_REPO=my-repo
 ```
+
+Project IDs and owner/repo are auto-detected from each repo's git remote URL — you don't need to set them.
 
 ### How to get tokens
 

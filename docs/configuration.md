@@ -205,18 +205,16 @@ pipeline:
 
 ## .env — Secrets Only
 
-Only tokens and credentials go here. Everything else is in `config.yaml`.
+Only API tokens go here. Everything else is in `config.yaml`.
+Project IDs and owner/repo are auto-detected from git remote URLs.
 
 ```bash
 # GitLab (when gitProvider.type = gitlab)
 GITLAB_BASE_URL=https://gitlab.com
 GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
-GITLAB_PROJECT_ID=12345
 
 # GitHub (when gitProvider.type = github)
 GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
-GITHUB_OWNER=my-org
-GITHUB_REPO=my-repo
 ```
 
 ---
@@ -259,8 +257,6 @@ pipeline:
 ```bash
 # .env
 GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
-GITHUB_OWNER=acme
-GITHUB_REPO=backend
 ```
 
 ---

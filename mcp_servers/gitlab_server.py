@@ -7,13 +7,14 @@ file commits, merge request management, commenting, and file reads.
 Requires the following environment variables:
 
 - ``GITLAB_TOKEN`` -- GitLab personal access token with ``api`` scope.
-- ``GITLAB_PROJECT_ID`` -- Numeric ID of the target GitLab project.
+- ``GITLAB_PROJECT_ID`` (optional) -- Numeric project ID. Auto-detected
+  from git remote if not set. Can also be passed per tool call.
 - ``GITLAB_BASE_URL`` (optional) -- GitLab instance URL, defaults to
   ``https://gitlab.com``.
 
 Usage::
 
-    GITLAB_TOKEN=xxx GITLAB_PROJECT_ID=123 python mcp_servers/gitlab_server.py
+    GITLAB_TOKEN=xxx python mcp_servers/gitlab_server.py
 """
 
 import json

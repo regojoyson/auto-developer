@@ -7,12 +7,13 @@ file commits, pull request management, commenting, and file reads.
 Requires the following environment variables:
 
 - ``GITHUB_TOKEN`` -- GitHub personal access token or fine-grained token.
-- ``GITHUB_OWNER`` -- Repository owner (organization or username).
-- ``GITHUB_REPO`` -- Repository name.
+- ``GITHUB_OWNER`` (optional) -- Repository owner. Auto-detected from
+  git remote if not set. Can also be passed per tool call.
+- ``GITHUB_REPO`` (optional) -- Repository name. Same as above.
 
 Usage::
 
-    GITHUB_TOKEN=xxx GITHUB_OWNER=myorg GITHUB_REPO=myrepo python mcp_servers/github_server.py
+    GITHUB_TOKEN=xxx python mcp_servers/github_server.py
 """
 
 import json
