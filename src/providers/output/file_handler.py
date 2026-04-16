@@ -34,14 +34,21 @@ class FileHandler(OutputHandlerBase):
         self._files[key].write(f"[agent:{agent_name}] started (cwd: {cwd})\n")
         self._files[key].flush()
 
-    def on_output(self, issue_key, agent_name, line, stream):
-        """Write a line to the log file."""
+    def _ensure_open(self, issue_key, agent_name):
+        """Ensure the log file is open, creating it if needed."""
         key = self._key(issue_key, agent_name)
-        f = self._files.get(key)
-        if f:
-            prefix = "[ERR] " if stream == "stderr" else ""
-            f.write(f"{prefix}{line}\n")
-            f.flush()
+        if key not in self._files:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            path = LOG_DIR / f"{key}.log"
+            self._files[key] = open(path, "a", buffering=1)
+        return self._files[key]
+
+    def on_output(self, issue_key, agent_name, line, stream):
+        """Write a line to the log file (auto-opens if not already open)."""
+        f = self._ensure_open(issue_key, agent_name)
+        prefix = "[ERR] " if stream == "stderr" else ""
+        f.write(f"{prefix}{line}\n")
+        f.flush()
 
     def on_finish(self, issue_key, agent_name, exit_code):
         """Close the log file."""
