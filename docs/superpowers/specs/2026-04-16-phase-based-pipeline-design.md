@@ -22,11 +22,13 @@ Restructure the pipeline so the **Python server controls the lifecycle** and age
 
 ```
 analyzing -> planning -> developing -> awaiting-review -> merged
-                                            |       ^
-                                         reworking --+
+    |            |           |              |       ^
+    +-----+------+-----------+           reworking --+
+          |                                  |
+        failed  <----------------------------+
 ```
 
-Two new states added: `analyzing` and `planning` (replacing the old `brainstorming` which tried to cover both).
+New states: `analyzing`, `planning`, `failed`. Replaces old `brainstorming`. Any active phase can transition to `failed` on unrecoverable errors. `failed` is terminal — clear state and re-trigger to retry.
 
 ### Phase Sequence (new ticket)
 
@@ -101,7 +103,7 @@ Format: `{issueKey}_{slug}` where slug is lowercase, underscores, max 40 chars. 
 | File | Changes |
 |------|---------|
 | `src/config.py` | Add `development_status` to `issue_tracker` config parsing |
-| `src/state/manager.py` | Add `analyzing` and `planning` states to `VALID_TRANSITIONS`. Update initial state to `analyzing`. |
+| `src/state/manager.py` | Add `analyzing`, `planning`, `failed` states to `VALID_TRANSITIONS`. Update initial state to `analyzing`. Add `record_phase_start()`, `record_phase_end()`, `update_artifacts()`. Extend `transition_state()` with optional `error` param. |
 | `src/routes/issue_tracker.py` | Call `run_pipeline_phases()` instead of `run_agent("orchestrator")`. Update branch naming. |
 | `src/routes/trigger.py` | Same as issue_tracker — call `run_pipeline_phases()`. Update branch naming. |
 | `src/routes/git_provider.py` | Rework path calls `run_rework_phases()` instead of just running feedback-parser. Add Jira status transitions. |
@@ -119,7 +121,9 @@ Format: `{issueKey}_{slug}` where slug is lowercase, underscores, max 40 chars. 
 | `agents/feedback-parser.md` | Still parses PR comments into FEEDBACK.md |
 | `agents/RULES.md` | Global rules still apply. Update state list in the Pipeline State Machine section. |
 | `src/executor/runner.py` | `run_agent()` stays the same — `pipeline.py` calls it |
-| `src/providers/*` | All adapters unchanged |
+| `src/providers/base.py` | Add `transition_issue()` and `add_comment()` abstract methods to `IssueTrackerBase` |
+| `src/providers/trackers/jira.py` | Implement `transition_issue()` and `add_comment()` via Jira REST API |
+| `src/providers/trackers/github_issues.py` | Implement `transition_issue()` and `add_comment()` via GitHub API |
 | `src/server.py` | No changes — routes handle the new logic |
 | `mcp_servers/*` | No changes |
 
@@ -321,15 +325,17 @@ Steps:
 
 ```python
 VALID_TRANSITIONS = {
-    "analyzing": ["planning"],
-    "planning": ["developing"],
-    "developing": ["awaiting-review"],
+    "analyzing": ["planning", "failed"],
+    "planning": ["developing", "failed"],
+    "developing": ["awaiting-review", "failed"],
     "awaiting-review": ["reworking", "merged"],
-    "reworking": ["awaiting-review"],
+    "reworking": ["awaiting-review", "failed"],
 }
 ```
 
 Initial state changes from `"brainstorming"` to `"analyzing"` in `create_state()`.
+
+Initial state file now includes `phases: []`, `artifacts: {}`, and `error: null`.
 
 ---
 
@@ -390,6 +396,7 @@ Add badge styles for new states in `dashboard-react/src/styles.css`:
 ```css
 .badge-analyzing     { background: #e0f2fe; color: #0369a1; }
 .badge-planning      { background: #dbeafe; color: #1e40af; }
+.badge-failed        { background: #fee2e2; color: #991b1b; }
 ```
 
 The existing `badge-brainstorming` can be kept for backward compatibility or removed.
@@ -452,13 +459,373 @@ States: `analyzing` -> `planning` -> `developing` -> `awaiting-review` -> `rewor
 
 ---
 
+## Detailed Design: Error Handling
+
+Every external call (Jira API, Slack, git operations, agent invocations) can fail. The pipeline must handle failures gracefully, leave the state machine in a recoverable position, and provide visibility into what went wrong.
+
+### Error Categories and Behavior
+
+| Category | Examples | Pipeline Behavior | State |
+|----------|---------|-------------------|-------|
+| **Agent failure** | Agent exits non-zero, times out | Post Jira comment with error, Slack notification, set state to `failed` | `failed` |
+| **Agent blocked** | Insufficient ticket info, plan reveals blocker | Post Jira comment with reason, transition Jira to Blocked, Slack notification | Stays at current phase (e.g. `analyzing`) |
+| **Jira API failure** | Transition fails, comment fails | Log error, continue pipeline — Jira updates are best-effort, don't block the work | No change |
+| **Slack failure** | Channel not found, token expired | Log warning, continue — notifications are best-effort | No change |
+| **Git operation failure** | Branch creation fails, MR creation fails | Post Jira comment, set state to `failed` — git failures are fatal | `failed` |
+
+### New State: `failed`
+
+Added to the state machine:
+
+```
+analyzing -> planning -> developing -> awaiting-review -> merged
+    |            |           |              |       ^
+    +-----+------+-----------+           reworking --+
+          |
+        failed
+```
+
+Any phase can transition to `failed`. The `failed` state is terminal — the pipeline stops. To retry, the user cancels the pipeline via `DELETE /api/status/{issueKey}` and re-triggers.
+
+```python
+VALID_TRANSITIONS = {
+    "analyzing": ["planning", "failed"],
+    "planning": ["developing", "failed"],
+    "developing": ["awaiting-review", "failed"],
+    "awaiting-review": ["reworking", "merged"],
+    "reworking": ["awaiting-review", "failed"],
+}
+```
+
+### Error Details in State File
+
+When the pipeline enters `failed` state, the error details are stored:
+
+```json
+{
+  "state": "failed",
+  "error": {
+    "phase": "developing",
+    "agent": "orchestrator:implement",
+    "message": "Agent timed out after 300s",
+    "timestamp": "2026-04-16T22:15:00Z"
+  }
+}
+```
+
+### `_handle_agent_failure` — Full Implementation
+
+```python
+def _handle_agent_failure(issue_key, branch, agent_name, result, statuses):
+    """Handle a non-zero agent exit."""
+    error_msg = result.get("error", "unknown error")
+    logger.error(f"Agent {agent_name} failed for {issue_key}: {error_msg}")
+
+    # 1. Transition pipeline state to failed (with error details)
+    transition_state(branch, "failed", error={
+        "phase": get_state(branch)["state"],
+        "agent": agent_name,
+        "message": error_msg,
+    })
+
+    # 2. Post Jira comment (best-effort)
+    try:
+        tracker.add_comment(issue_key,
+            f"Pipeline failed during {agent_name}.\n\nError: {error_msg}\n\nCheck logs for details.")
+    except Exception as e:
+        logger.warning(f"Failed to post Jira comment for {issue_key}: {e}")
+
+    # 3. Slack notification (best-effort)
+    try:
+        _notify_slack(f"{issue_key} pipeline failed during {agent_name} — check logs")
+    except Exception as e:
+        logger.warning(f"Failed to send Slack notification for {issue_key}: {e}")
+```
+
+### `_handle_blocked` — Full Implementation
+
+```python
+def _handle_blocked(issue_key, branch, statuses, result):
+    """Handle an agent reporting the ticket is blocked."""
+    reason = _extract_blocked_reason(result)
+    logger.info(f"Pipeline blocked for {issue_key}: {reason}")
+
+    # 1. Post Jira comment (best-effort)
+    try:
+        tracker.add_comment(issue_key,
+            f"Pipeline blocked — additional information needed:\n\n{reason}")
+    except Exception as e:
+        logger.warning(f"Failed to post Jira comment for {issue_key}: {e}")
+
+    # 2. Transition Jira to Blocked status (best-effort)
+    try:
+        tracker.transition_issue(issue_key, statuses["blocked"])
+    except Exception as e:
+        logger.warning(f"Failed to transition Jira for {issue_key}: {e}")
+
+    # 3. Slack notification (best-effort)
+    try:
+        _notify_slack(f"{issue_key} blocked — {reason}")
+    except Exception as e:
+        logger.warning(f"Failed to send Slack notification for {issue_key}: {e}")
+
+    # Pipeline state stays at current phase — NOT transitioned to failed.
+    # The ticket can be unblocked and re-triggered.
+```
+
+### Wrapping Phase Calls with try/except
+
+Each phase in `run_pipeline_phases` is wrapped:
+
+```python
+try:
+    result = run_agent("orchestrator", input_data, cwd=repo_dir, issue_key=issue_key)
+except Exception as e:
+    _handle_agent_failure(issue_key, branch, "orchestrator:analyze",
+        {"success": False, "error": str(e)}, statuses)
+    return
+```
+
+This catches unexpected exceptions (subprocess crashes, OOM, etc.) that `run_agent` doesn't handle internally.
+
+### Jira/Slack Calls Are Best-Effort
+
+All Jira transitions and Slack notifications in the happy path are also wrapped in try/except:
+
+```python
+# Best-effort Jira transition — don't stop the pipeline if Jira is down
+try:
+    tracker.transition_issue(issue_key, statuses["development"])
+except Exception as e:
+    logger.warning(f"Failed to transition Jira {issue_key} to Development: {e}")
+```
+
+The pipeline continues even if Jira or Slack calls fail. The only fatal failures are agent failures and git operation failures.
+
+---
+
+## Detailed Design: Pipeline State Tracking
+
+### Enriched State File
+
+The pipeline state file is the single source of truth for tracking. It gets new fields for phase history, timing, and artifact tracking:
+
+```json
+{
+  "branch": "ev-14111_create_dashboard",
+  "issueKey": "EV-14111",
+  "state": "developing",
+  "createdAt": "2026-04-16T21:30:00Z",
+  "updatedAt": "2026-04-16T21:45:00Z",
+  "reworkCount": 0,
+  "repoPath": "/Users/admin/data/workspace/EdgeReg",
+  "error": null,
+  "phases": [
+    {
+      "phase": "analyzing",
+      "startedAt": "2026-04-16T21:30:05Z",
+      "completedAt": "2026-04-16T21:32:10Z",
+      "agent": "orchestrator:analyze",
+      "exitCode": 0,
+      "result": "success"
+    },
+    {
+      "phase": "planning",
+      "startedAt": "2026-04-16T21:32:11Z",
+      "completedAt": "2026-04-16T21:38:45Z",
+      "agent": "orchestrator:plan",
+      "exitCode": 0,
+      "result": "success"
+    },
+    {
+      "phase": "developing",
+      "startedAt": "2026-04-16T21:38:46Z",
+      "completedAt": null,
+      "agent": "orchestrator:implement",
+      "exitCode": null,
+      "result": null
+    }
+  ],
+  "artifacts": {
+    "mrUrl": null,
+    "prId": null,
+    "ticketMdCommit": "abc1234",
+    "planMdCommit": "def5678"
+  }
+}
+```
+
+### `phases` Array
+
+Every phase execution is recorded with:
+- `phase`: state name when this ran
+- `startedAt` / `completedAt`: ISO timestamps
+- `agent`: which agent ran (e.g. `orchestrator:analyze`, `feedback-parser`)
+- `exitCode`: agent process exit code (null while running)
+- `result`: `"success"`, `"failed"`, `"blocked"`, or null while running
+
+Rework phases append to the same array, so you get a full timeline:
+```json
+{
+  "phase": "reworking",
+  "startedAt": "2026-04-17T10:00:00Z",
+  "completedAt": "2026-04-17T10:15:00Z",
+  "agent": "orchestrator:rework",
+  "exitCode": 0,
+  "result": "success",
+  "reworkIteration": 1
+}
+```
+
+### `artifacts` Object
+
+Tracks key outputs:
+- `mrUrl`: MR/PR URL once created
+- `prId`: MR/PR numeric ID for webhook matching
+- `ticketMdCommit`: commit SHA of TICKET.md
+- `planMdCommit`: commit SHA of PLAN.md
+
+### State Manager Changes
+
+`transition_state()` signature extends to accept optional metadata:
+
+```python
+def transition_state(branch: str, new_state: str, error: dict | None = None) -> dict:
+    # existing validation...
+    current["state"] = new_state
+    current["updatedAt"] = now
+    if error:
+        current["error"] = {**error, "timestamp": now}
+    if new_state == "reworking":
+        current["reworkCount"] = current.get("reworkCount", 0) + 1
+    _state_path(branch).write_text(json.dumps(current, indent=2))
+    return current
+```
+
+New helper functions:
+
+```python
+def record_phase_start(branch: str, phase: str, agent: str) -> dict:
+    """Record the start of a phase execution in the phases array."""
+    current = get_state(branch)
+    phases = current.get("phases", [])
+    phases.append({
+        "phase": phase,
+        "startedAt": datetime.now(timezone.utc).isoformat(),
+        "completedAt": None,
+        "agent": agent,
+        "exitCode": None,
+        "result": None,
+    })
+    current["phases"] = phases
+    current["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    _state_path(branch).write_text(json.dumps(current, indent=2))
+    return current
+
+
+def record_phase_end(branch: str, exit_code: int, result: str) -> dict:
+    """Record the completion of the current phase."""
+    current = get_state(branch)
+    phases = current.get("phases", [])
+    if phases and phases[-1]["completedAt"] is None:
+        phases[-1]["completedAt"] = datetime.now(timezone.utc).isoformat()
+        phases[-1]["exitCode"] = exit_code
+        phases[-1]["result"] = result
+    current["phases"] = phases
+    current["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    _state_path(branch).write_text(json.dumps(current, indent=2))
+    return current
+
+
+def update_artifacts(branch: str, **kwargs) -> dict:
+    """Update artifact tracking (mrUrl, prId, etc.)."""
+    current = get_state(branch)
+    artifacts = current.get("artifacts", {})
+    artifacts.update(kwargs)
+    current["artifacts"] = artifacts
+    current["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    _state_path(branch).write_text(json.dumps(current, indent=2))
+    return current
+```
+
+### Updated `run_pipeline_phases` with Tracking
+
+```python
+def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, statuses, repo_dir):
+    # Step 1: Jira transition (best-effort)
+    _try_transition_jira(issue_key, statuses["development"])
+
+    # Step 2: Analyze
+    record_phase_start(branch, "analyzing", "orchestrator:analyze")
+    try:
+        result = run_agent("orchestrator", analyze_input, cwd=repo_dir, issue_key=issue_key)
+    except Exception as e:
+        record_phase_end(branch, -1, "failed")
+        _handle_agent_failure(issue_key, branch, "orchestrator:analyze", {"error": str(e)}, statuses)
+        return
+
+    if not result.get("success"):
+        record_phase_end(branch, result.get("exit_code", -1), "failed")
+        _handle_agent_failure(issue_key, branch, "orchestrator:analyze", result, statuses)
+        return
+    if _is_blocked(result):
+        record_phase_end(branch, 0, "blocked")
+        _handle_blocked(issue_key, branch, statuses, result)
+        return
+    record_phase_end(branch, 0, "success")
+
+    # Step 3: Plan
+    transition_state(branch, "planning")
+    record_phase_start(branch, "planning", "orchestrator:plan")
+    # ... same pattern ...
+
+    # Step 4: Implement
+    transition_state(branch, "developing")
+    record_phase_start(branch, "developing", "orchestrator:implement")
+    # ... same pattern ...
+
+    # Step 5: Awaiting review
+    transition_state(branch, "awaiting-review")
+    _try_transition_jira(issue_key, statuses["done"])
+    _try_notify_slack(f"MR created for {issue_key}")
+```
+
+### Dashboard / API Tracking
+
+The `GET /api/status/{issue_key}` endpoint already returns the full state file. With the enriched state, the dashboard automatically gets:
+- Current phase and how long it's been running
+- Full phase history with timing
+- Error details if failed
+- Artifact links (MR URL)
+- Rework count and iteration history
+
+The dashboard `PipelineDetail.jsx` can render the `phases` array as a timeline. A `badge-failed` CSS class is needed:
+
+```css
+.badge-failed { background: #fee2e2; color: #991b1b; }
+```
+
+---
+
+## Detailed Design: Retry / Re-trigger After Failure
+
+When a pipeline is in `failed` state:
+1. User calls `DELETE /api/status/{issueKey}` to clear the state
+2. User calls `POST /api/trigger` with the same issue key to re-trigger
+3. Pipeline starts fresh from `analyzing`
+
+No partial retry (e.g. "resume from planning") in this version — that adds complexity. The pipeline is fast enough that re-running from the start is acceptable.
+
+---
+
 ## What This Does NOT Change
 
 - Agent autonomy rules (RULES.md) — agents remain fully autonomous
 - MCP server implementations
-- Provider adapter interfaces (base.py)
 - Output handler system (file + memory)
 - CLI adapter system (claude-code, codex, gemini)
+- Git provider adapters (gitlab.py, github.py)
+- Notification adapters (slack.py)
 - The brainstorm agent's behavior (still writes PLAN.md)
 - The developer agent's behavior (still implements from PLAN.md)
 - The feedback-parser agent's behavior (still writes FEEDBACK.md)
