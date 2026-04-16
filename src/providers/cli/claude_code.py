@@ -44,13 +44,13 @@ class ClaudeCodeAdapter(CliAdapterBase):
             "--agent", agent_name,
             "--print",                  # non-interactive output mode
             "--dangerously-skip-permissions",  # auto-approve all tool calls
-            "--input", input_text,
         ]
         if config.get("model"):
             args.extend(["--model", config["model"]])
         if config.get("max_turns"):
             args.extend(["--max-turns", str(config["max_turns"])])
         args.extend(config.get("extra_args") or [])
+        args.append(input_text)         # prompt as positional argument (must be last)
         return args
 
     def parse_output(self, stdout, stderr, exit_code):
