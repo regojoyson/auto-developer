@@ -6,18 +6,22 @@ Tracks each ticket's lifecycle as a JSON file per branch inside
 to prevent duplicate processing.
 
 State flow:
-    (new) → brainstorming → developing → awaiting-review → merged
-                                               ↓       ↑
-                                            reworking ──┘
+    (new) → analyzing → planning → developing → awaiting-review → merged
+                |           |          |              ↓       ↑
+                +-----+-----+----------+           reworking ──┘
+                      |
+                    failed
 
 Usage:
     from src.state.manager import create_state, get_state, transition_state
 
-    create_state("feature/PROJ-1-login", "PROJ-1", "/projects/my-app")
-    transition_state("feature/PROJ-1-login", "developing")
-    state = get_state("feature/PROJ-1-login")
-    print(state["state"])  # "developing"
+    create_state("ev-14942_fix_xss", "EV-14942", "/projects/my-app")
+    transition_state("ev-14942_fix_xss", "planning")
+    state = get_state("ev-14942_fix_xss")
+    print(state["state"])  # "planning"
 """
+
+from __future__ import annotations
 
 import json
 import logging
@@ -31,10 +35,11 @@ STATE_DIR = Path(__file__).parent.parent.parent / ".pipeline-state"
 # Defines which state transitions are allowed.
 # Key = current state, Value = list of states it can transition to.
 VALID_TRANSITIONS = {
-    "brainstorming": ["developing"],
-    "developing": ["awaiting-review"],
+    "analyzing": ["planning", "failed"],
+    "planning": ["developing", "failed"],
+    "developing": ["awaiting-review", "failed"],
     "awaiting-review": ["reworking", "merged"],
-    "reworking": ["awaiting-review"],
+    "reworking": ["awaiting-review", "failed"],
 }
 
 
@@ -42,7 +47,7 @@ def _state_path(branch: str) -> Path:
     """Convert a branch name to a safe filesystem path for its state file.
 
     Args:
-        branch: Git branch name (e.g. "feature/PROJ-1-login").
+        branch: Git branch name (e.g. "ev-14942_fix_xss").
 
     Returns:
         Path to the JSON state file (slashes replaced with double underscores).
@@ -58,8 +63,7 @@ def get_state(branch: str) -> dict | None:
         branch: Git branch name.
 
     Returns:
-        State dict with keys (branch, issueKey, state, createdAt, updatedAt,
-        reworkCount, repoPath), or None if no state file exists.
+        State dict or None if no state file exists.
     """
     path = _state_path(branch)
     if not path.exists():
@@ -70,11 +74,11 @@ def get_state(branch: str) -> dict | None:
 def create_state(branch: str, issue_key: str, repo_path: str | None = None) -> dict:
     """Create an initial pipeline state for a new ticket.
 
-    The state starts at "brainstorming" with reworkCount=0.
+    The state starts at "analyzing" with reworkCount=0.
 
     Args:
-        branch: Git branch name (e.g. "feature/PROJ-1-login").
-        issue_key: Ticket identifier (e.g. "PROJ-1").
+        branch: Git branch name (e.g. "ev-14942_fix_xss").
+        issue_key: Ticket identifier (e.g. "EV-14942").
         repo_path: Absolute path to the target repo directory (optional).
 
     Returns:
@@ -85,25 +89,31 @@ def create_state(branch: str, issue_key: str, repo_path: str | None = None) -> d
     state = {
         "branch": branch,
         "issueKey": issue_key,
-        "state": "brainstorming",
+        "state": "analyzing",
         "createdAt": now,
         "updatedAt": now,
         "reworkCount": 0,
         "repoPath": repo_path,
+        "error": None,
+        "phases": [],
+        "artifacts": {},
     }
     _state_path(branch).write_text(json.dumps(state, indent=2))
     return state
 
 
-def transition_state(branch: str, new_state: str) -> dict:
+def transition_state(branch: str, new_state: str, error: dict | None = None) -> dict:
     """Transition a branch's pipeline to a new state.
 
     Validates the transition against VALID_TRANSITIONS. Increments
-    reworkCount when transitioning to "reworking".
+    reworkCount when transitioning to "reworking". Stores error details
+    when transitioning to "failed".
 
     Args:
         branch: Git branch name.
-        new_state: Target state (e.g. "developing", "awaiting-review").
+        new_state: Target state (e.g. "developing", "awaiting-review", "failed").
+        error: Optional error details dict with keys (phase, agent, message).
+            Only used when new_state is "failed".
 
     Returns:
         Updated state dict.
@@ -120,11 +130,95 @@ def transition_state(branch: str, new_state: str) -> dict:
     if new_state not in allowed:
         raise ValueError(f"Invalid transition: {current['state']} -> {new_state} (branch: {branch})")
 
+    now = datetime.now(timezone.utc).isoformat()
     current["state"] = new_state
-    current["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    current["updatedAt"] = now
     if new_state == "reworking":
         current["reworkCount"] = current.get("reworkCount", 0) + 1
+    if error:
+        current["error"] = {**error, "timestamp": now}
 
+    _state_path(branch).write_text(json.dumps(current, indent=2))
+    return current
+
+
+def record_phase_start(branch: str, phase: str, agent: str) -> dict:
+    """Record the start of a phase execution in the phases array.
+
+    Args:
+        branch: Git branch name.
+        phase: Pipeline state name (e.g. "analyzing", "planning").
+        agent: Agent identifier (e.g. "orchestrator:analyze").
+
+    Returns:
+        Updated state dict.
+    """
+    current = get_state(branch)
+    if not current:
+        raise ValueError(f"No pipeline state for branch: {branch}")
+
+    phases = current.get("phases", [])
+    phases.append({
+        "phase": phase,
+        "startedAt": datetime.now(timezone.utc).isoformat(),
+        "completedAt": None,
+        "agent": agent,
+        "exitCode": None,
+        "result": None,
+    })
+    current["phases"] = phases
+    current["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    _state_path(branch).write_text(json.dumps(current, indent=2))
+    return current
+
+
+def record_phase_end(branch: str, exit_code: int, result: str) -> dict:
+    """Record the completion of the most recent phase.
+
+    Finds the last phase entry with completedAt=None and fills in
+    the completion timestamp, exit code, and result.
+
+    Args:
+        branch: Git branch name.
+        exit_code: Agent process exit code (0 = success).
+        result: One of "success", "failed", "blocked".
+
+    Returns:
+        Updated state dict.
+    """
+    current = get_state(branch)
+    if not current:
+        raise ValueError(f"No pipeline state for branch: {branch}")
+
+    phases = current.get("phases", [])
+    if phases and phases[-1]["completedAt"] is None:
+        phases[-1]["completedAt"] = datetime.now(timezone.utc).isoformat()
+        phases[-1]["exitCode"] = exit_code
+        phases[-1]["result"] = result
+    current["phases"] = phases
+    current["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    _state_path(branch).write_text(json.dumps(current, indent=2))
+    return current
+
+
+def update_artifacts(branch: str, **kwargs) -> dict:
+    """Update artifact tracking fields (mrUrl, prId, etc.).
+
+    Args:
+        branch: Git branch name.
+        **kwargs: Key-value pairs to merge into the artifacts dict.
+
+    Returns:
+        Updated state dict.
+    """
+    current = get_state(branch)
+    if not current:
+        raise ValueError(f"No pipeline state for branch: {branch}")
+
+    artifacts = current.get("artifacts", {})
+    artifacts.update(kwargs)
+    current["artifacts"] = artifacts
+    current["updatedAt"] = datetime.now(timezone.utc).isoformat()
     _state_path(branch).write_text(json.dumps(current, indent=2))
     return current
 
