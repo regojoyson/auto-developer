@@ -417,10 +417,16 @@ def ask_pipeline(total_steps: int, prev: dict | None = None) -> dict:
     info("  • [bold]File[/bold] — writes to logs/agents/ (use [cyan]tail -f[/cyan] to watch)")
     info("  • [bold]Memory[/bold] — serves via API ([cyan]/api/status/{'{key}'}/logs[/cyan])")
     info("Select one or both:")
+
+    # Build checkbox choices with pre-checked state from prev config
+    prev_handlers = p.get("outputHandlers", PIPELINE_DEFAULTS["output_handlers"])
+    handler_choices = [
+        questionary.Choice(c.title, value=c.value, checked=(c.value in prev_handlers))
+        for c in OUTPUT_HANDLERS
+    ]
     output_handlers = questionary.checkbox(
         "Output handlers:",
-        choices=OUTPUT_HANDLERS,
-        default=PIPELINE_DEFAULTS["output_handlers"],
+        choices=handler_choices,
         style=STYLE,
     ).ask()
 
