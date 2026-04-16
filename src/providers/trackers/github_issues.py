@@ -78,6 +78,54 @@ class GitHubIssuesAdapter(IssueTrackerBase):
             "component": None,
         }
 
+    def read_issue(self, issue_key):
+        """Read full issue details from GitHub via REST API.
+
+        Args:
+            issue_key: Issue key in "repo#123" format.
+
+        Returns:
+            Dict with structured ticket data.
+        """
+        repo_full, number = self._parse_issue_key(issue_key)
+        headers = self._api_headers()
+
+        # Read issue
+        resp = requests.get(
+            f"https://api.github.com/repos/{repo_full}/issues/{number}",
+            headers=headers,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        # Read comments
+        comments = []
+        comments_resp = requests.get(
+            f"https://api.github.com/repos/{repo_full}/issues/{number}/comments",
+            headers=headers,
+        )
+        if comments_resp.status_code == 200:
+            for c in comments_resp.json():
+                comments.append({
+                    "author": c.get("user", {}).get("login", "Unknown"),
+                    "body": c.get("body", ""),
+                })
+
+        return {
+            "key": issue_key,
+            "summary": data.get("title", ""),
+            "description": data.get("body", "") or "",
+            "status": data.get("state", ""),
+            "priority": "",
+            "labels": [l.get("name", "") for l in data.get("labels", [])],
+            "components": [],
+            "linked_issues": [],
+            "comments": comments,
+            "attachments": [],
+            "acceptance_criteria": "",
+            "raw_fields": data,
+        }
+
     def transition_issue(self, issue_key, status_name):
         """Transition a GitHub issue by adding a label.
 

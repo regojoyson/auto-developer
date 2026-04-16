@@ -18,6 +18,29 @@ from src.providers.base import IssueTrackerBase
 logger = logging.getLogger(__name__)
 
 
+def _extract_adf_text(adf_body):
+    """Extract plain text from Atlassian Document Format (ADF) JSON."""
+    if not adf_body or not isinstance(adf_body, dict):
+        return str(adf_body) if adf_body else ""
+    texts = []
+    for node in adf_body.get("content", []):
+        for inline in node.get("content", []):
+            if inline.get("type") == "text":
+                texts.append(inline.get("text", ""))
+    return "\n".join(texts)
+
+
+def _extract_field_text(field_value):
+    """Extract text from a Jira field that might be ADF, string, or None."""
+    if field_value is None:
+        return ""
+    if isinstance(field_value, str):
+        return field_value
+    if isinstance(field_value, dict):
+        return _extract_adf_text(field_value)
+    return str(field_value)
+
+
 class JiraAdapter(IssueTrackerBase):
     """Adapter that parses Jira webhook payloads and calls Jira REST API.
 
@@ -82,6 +105,89 @@ class JiraAdapter(IssueTrackerBase):
             "issue_key": issue_key,
             "summary": fields.get("summary", ""),
             "component": components[0]["name"] if components else None,
+        }
+
+    def read_issue(self, issue_key):
+        """Read full issue details from Jira via REST API.
+
+        Fetches all fields including custom fields, comments, and linked issues.
+
+        Args:
+            issue_key: Jira issue key (e.g. "EV-14942").
+
+        Returns:
+            Dict with structured ticket data.
+        """
+        base = self._base_url()
+        headers = self._api_headers()
+
+        # Try v3 first, fall back to v2
+        for api_ver in ["3", "2"]:
+            resp = requests.get(
+                f"{base}/rest/api/{api_ver}/issue/{issue_key}",
+                headers=headers,
+                params={"expand": "renderedFields"},
+            )
+            if resp.status_code == 200:
+                break
+
+        self._check_response(resp, "read issue", issue_key)
+
+        try:
+            data = resp.json()
+        except Exception:
+            raise RuntimeError(f"Jira returned non-JSON for {issue_key}: HTTP {resp.status_code}")
+
+        fields = data.get("fields", {})
+
+        # Extract linked issues
+        linked = []
+        for link in fields.get("issuelinks", []):
+            if link.get("outwardIssue"):
+                linked.append({
+                    "key": link["outwardIssue"]["key"],
+                    "summary": link["outwardIssue"]["fields"]["summary"],
+                    "relation": link.get("type", {}).get("outward", "relates to"),
+                })
+            if link.get("inwardIssue"):
+                linked.append({
+                    "key": link["inwardIssue"]["key"],
+                    "summary": link["inwardIssue"]["fields"]["summary"],
+                    "relation": link.get("type", {}).get("inward", "relates to"),
+                })
+
+        # Extract comments
+        comments = []
+        for c in fields.get("comment", {}).get("comments", []):
+            author = c.get("author", {}).get("displayName", "Unknown")
+            body = c.get("body", "")
+            # ADF body — extract text content
+            if isinstance(body, dict):
+                body = _extract_adf_text(body)
+            comments.append({"author": author, "body": body})
+
+        # Extract attachments
+        attachments = []
+        for a in fields.get("attachment", []):
+            attachments.append({
+                "filename": a.get("filename", ""),
+                "mimeType": a.get("mimeType", ""),
+                "size": a.get("size", 0),
+            })
+
+        return {
+            "key": issue_key,
+            "summary": fields.get("summary", ""),
+            "description": _extract_field_text(fields.get("description")),
+            "status": fields.get("status", {}).get("name", ""),
+            "priority": fields.get("priority", {}).get("name", ""),
+            "labels": fields.get("labels", []),
+            "components": [c.get("name", "") for c in fields.get("components", [])],
+            "linked_issues": linked,
+            "comments": comments,
+            "attachments": attachments,
+            "acceptance_criteria": _extract_field_text(fields.get("customfield_10037")),  # common AC field
+            "raw_fields": fields,  # pass all fields for the agent to inspect
         }
 
     def _check_response(self, resp, action, issue_key):

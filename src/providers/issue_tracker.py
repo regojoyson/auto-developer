@@ -1,14 +1,20 @@
 """Factory for loading the configured issue tracker adapter.
 
-Reads the ``issue_tracker.type`` field from the application configuration and
-lazily imports the corresponding adapter module (Jira or GitHub Issues). The
-adapter instance is cached as a module-level singleton so subsequent calls
-return the same object without re-importing.
+Reads the ``issue_tracker`` section from config and loads the corresponding
+adapter based on the ``platform`` field (jira or github-issues). The adapter
+provides webhook parsing, and in API mode, also provides read_issue(),
+transition_issue(), and add_comment() methods.
 
 Usage::
 
     adapter, tracker_config = get_issue_tracker()
     parsed = adapter.parse_webhook(headers, payload, tracker_config)
+
+    # In API mode:
+    if tracker_config["api_mode"] == "api":
+        ticket = adapter.read_issue("EV-14942")
+        adapter.transition_issue("EV-14942", "Development")
+        adapter.add_comment("EV-14942", "Pipeline started")
 """
 
 from src.config import config
@@ -19,32 +25,40 @@ _instance = None
 def get_issue_tracker():
     """Return the issue tracker adapter and its configuration.
 
-    On first call, reads ``config["issue_tracker"]["type"]`` to determine
+    On first call, reads ``config["issue_tracker"]["platform"]`` to determine
     which adapter to load, imports the corresponding module, and caches the
-    result. Subsequent calls return the cached instance immediately.
+    result.
 
     Returns:
         tuple: A 2-tuple of ``(adapter, tracker_config)`` where *adapter* is
             an :class:`~src.providers.base.IssueTrackerBase` instance and
-            *tracker_config* is the ``issue_tracker`` section of config.yaml.
+            *tracker_config* is the ``issue_tracker`` section of config.
 
     Raises:
-        ValueError: If the configured adapter type is not one of the
-            supported values (``jira``, ``github-issues``).
+        ValueError: If the configured platform is not supported.
     """
     global _instance
     if _instance:
         return _instance
 
     tracker_config = config["issue_tracker"]
-    adapter_type = tracker_config["type"]
+    platform = tracker_config["platform"]
 
-    if adapter_type == "jira":
+    if platform == "jira":
         from src.providers.trackers.jira import adapter
-    elif adapter_type == "github-issues":
+    elif platform == "github-issues":
         from src.providers.trackers.github_issues import adapter
     else:
-        raise ValueError(f"Unknown issue tracker: '{adapter_type}'. Supported: jira, github-issues")
+        raise ValueError(f"Unknown issue tracker platform: '{platform}'. Supported: jira, github-issues")
 
     _instance = (adapter, tracker_config)
     return _instance
+
+
+def is_api_mode():
+    """Check if the issue tracker is in API mode (Python REST calls).
+
+    Returns:
+        True if api_mode == "api", False if "mcp".
+    """
+    return config["issue_tracker"]["api_mode"] == "api"

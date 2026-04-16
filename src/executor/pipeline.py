@@ -23,7 +23,8 @@ from src.state.manager import (
     record_phase_start,
     record_phase_end,
 )
-from src.providers.issue_tracker import get_issue_tracker
+from src.config import config as app_config
+from src.providers.issue_tracker import get_issue_tracker, is_api_mode
 from src.providers.notification import get_notification
 from src.providers.output_handler import get_output_handlers
 from src.repos.resolver import get_base_branch
@@ -154,7 +155,10 @@ def _extract_blocked_reason(result):
 # ─── Best-Effort External Calls ─────────────────────────
 
 def _try_transition_issue(issue_key, status_name):
-    """Transition issue status (best-effort — logs and continues on failure)."""
+    """Transition issue status (best-effort). Skipped in MCP mode — agent handles it."""
+    if not is_api_mode():
+        logger.info(f"{issue_key}: Skipping transition (MCP mode — agent handles via MCP tools)")
+        return
     try:
         adapter, _ = get_issue_tracker()
         adapter.transition_issue(issue_key, status_name)
@@ -164,7 +168,10 @@ def _try_transition_issue(issue_key, status_name):
 
 
 def _try_add_comment(issue_key, body):
-    """Post an issue comment (best-effort — logs and continues on failure)."""
+    """Post an issue comment (best-effort). Skipped in MCP mode — agent handles it."""
+    if not is_api_mode():
+        logger.info(f"{issue_key}: Skipping comment (MCP mode — agent handles via MCP tools)")
+        return
     try:
         adapter, _ = get_issue_tracker()
         adapter.add_comment(issue_key, body)
@@ -298,27 +305,50 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
     _log_step(issue_key, f"Preparing repo — stash, checkout {base_branch}, pull latest...")
     _prepare_repo_for_branch(repo_dir, base_branch)
 
-    # ── Step 2: Transition ticket to Development (CRITICAL — pipeline stops on failure)
-    _log_step(issue_key, f"Transitioning ticket to '{statuses['development']}'...")
-    try:
-        adapter, _ = get_issue_tracker()
-        adapter.transition_issue(issue_key, statuses["development"])
-        _log_step(issue_key, f"Ticket transitioned to '{statuses['development']}' successfully")
-    except Exception as e:
-        error_msg = str(e)
-        _log_step(issue_key, f"CRITICAL: Failed to transition ticket — {error_msg}")
-        logger.error(f"{issue_key}: Cannot transition to '{statuses['development']}': {error_msg}")
-        transition_state(branch, "failed", error={
-            "phase": "analyzing",
-            "agent": "pipeline",
-            "message": f"Failed to transition ticket to '{statuses['development']}': {error_msg}",
-        })
-        _try_notify_slack(f"{issue_key} pipeline failed — could not transition ticket to '{statuses['development']}'")
-        return
+    # ── Step 2: Transition ticket to Development ─────────
+    if is_api_mode():
+        # API mode — Python server transitions (CRITICAL — pipeline stops on failure)
+        _log_step(issue_key, f"Transitioning ticket to '{statuses['development']}' (via REST API)...")
+        try:
+            adapter, _ = get_issue_tracker()
+            adapter.transition_issue(issue_key, statuses["development"])
+            _log_step(issue_key, f"Ticket transitioned to '{statuses['development']}' successfully")
+        except Exception as e:
+            error_msg = str(e)
+            _log_step(issue_key, f"CRITICAL: Failed to transition ticket — {error_msg}")
+            logger.error(f"{issue_key}: Cannot transition to '{statuses['development']}': {error_msg}")
+            transition_state(branch, "failed", error={
+                "phase": "analyzing",
+                "agent": "pipeline",
+                "message": f"Failed to transition ticket to '{statuses['development']}': {error_msg}",
+            })
+            _try_notify_slack(f"{issue_key} pipeline failed — could not transition ticket")
+            return
+    else:
+        _log_step(issue_key, "Ticket transition will be handled by agent via MCP")
 
-    # ── Step 3: Phase 1 — Analyze ────────────────────────
-    # Agent reads ticket, creates feature branch, writes TICKET.md, posts analysis comment
-    analyze_input = json.dumps({
+    # ── Step 3: Read ticket (API mode only) ──────────────
+    ticket_data = None
+    if is_api_mode():
+        _log_step(issue_key, "Reading ticket details via REST API...")
+        try:
+            adapter, _ = get_issue_tracker()
+            ticket_data = adapter.read_issue(issue_key)
+            _log_step(issue_key, f"Ticket read: {ticket_data.get('summary', '')}")
+        except Exception as e:
+            error_msg = str(e)
+            _log_step(issue_key, f"CRITICAL: Failed to read ticket — {error_msg}")
+            transition_state(branch, "failed", error={
+                "phase": "analyzing",
+                "agent": "pipeline",
+                "message": f"Failed to read ticket: {error_msg}",
+            })
+            return
+
+    # ── Step 4: Phase 1 — Analyze ────────────────────────
+    # Agent reads ticket (or receives pre-read data), creates feature branch, writes TICKET.md
+    api_mode = app_config["issue_tracker"]["api_mode"]
+    analyze_payload = {
         "action": "analyze",
         "issueKey": issue_key,
         "branch": branch,
@@ -326,7 +356,11 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
         "projectKey": project_key,
         "baseBranch": base_branch,
         "statuses": statuses,
-    })
+        "apiMode": api_mode,
+    }
+    if ticket_data:
+        analyze_payload["ticketData"] = ticket_data
+    analyze_input = json.dumps(analyze_payload)
     result = _run_phase(issue_key, branch, "orchestrator", "orchestrator:analyze",
                         analyze_input, statuses, repo_dir)
     if result is None:
@@ -341,6 +375,7 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
         "issueKey": issue_key,
         "branch": branch,
         "statuses": statuses,
+        "apiMode": api_mode,
     })
     result = _run_phase(issue_key, branch, "orchestrator", "orchestrator:plan",
                         plan_input, statuses, repo_dir)
@@ -363,6 +398,7 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
         "summary": summary,
         "baseBranch": base_branch,
         "statuses": statuses,
+        "apiMode": api_mode,
     })
     result = _run_phase(issue_key, branch, "orchestrator", "orchestrator:implement",
                         implement_input, statuses, repo_dir)
@@ -414,23 +450,24 @@ def run_rework_phases(issue_key, branch, pr_id, statuses, repo_dir):
     _log_step(issue_key, f"Checking out feature branch {branch} (same branch as MR)...")
     _prepare_repo_for_branch(repo_dir, base_branch, feature_branch=branch)
 
-    # ── Step 2: Transition ticket to Development (CRITICAL — rework stops on failure)
-    _log_step(issue_key, f"Transitioning ticket to '{statuses['development']}'...")
-    try:
-        adapter, _ = get_issue_tracker()
-        adapter.transition_issue(issue_key, statuses["development"])
-        _log_step(issue_key, f"Ticket transitioned to '{statuses['development']}' successfully")
-    except Exception as e:
-        error_msg = str(e)
-        _log_step(issue_key, f"CRITICAL: Failed to transition ticket — {error_msg}")
-        logger.error(f"{issue_key}: Cannot transition to '{statuses['development']}': {error_msg}")
-        transition_state(branch, "failed", error={
-            "phase": "reworking",
-            "agent": "pipeline",
-            "message": f"Failed to transition ticket to '{statuses['development']}': {error_msg}",
-        })
-        _try_notify_slack(f"{issue_key} rework failed — could not transition ticket to '{statuses['development']}'")
-        return
+    # ── Step 2: Transition ticket to Development ─────────
+    if is_api_mode():
+        _log_step(issue_key, f"Transitioning ticket to '{statuses['development']}' (via REST API)...")
+        try:
+            adapter, _ = get_issue_tracker()
+            adapter.transition_issue(issue_key, statuses["development"])
+            _log_step(issue_key, f"Ticket transitioned to '{statuses['development']}' successfully")
+        except Exception as e:
+            error_msg = str(e)
+            _log_step(issue_key, f"CRITICAL: Failed to transition ticket — {error_msg}")
+            transition_state(branch, "failed", error={
+                "phase": "reworking",
+                "agent": "pipeline",
+                "message": f"Failed to transition ticket: {error_msg}",
+            })
+            return
+    else:
+        _log_step(issue_key, "Ticket transition will be handled by agent via MCP")
 
     _log_step(issue_key, "Transitioning state: awaiting-review → reworking")
     transition_state(branch, "reworking")

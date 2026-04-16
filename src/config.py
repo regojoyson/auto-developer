@@ -27,6 +27,43 @@ CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
 
 _cache = None
 
+# Maps config type to (platform, api_mode)
+_TRACKER_TYPE_MAP = {
+    "jira-mcp": ("jira", "mcp"),
+    "jira-api": ("jira", "api"),
+    "github-mcp": ("github-issues", "mcp"),
+    "github-api": ("github-issues", "api"),
+    # Backward compat: old type names default to mcp mode
+    "jira": ("jira", "mcp"),
+    "github-issues": ("github-issues", "mcp"),
+}
+
+
+def _parse_issue_tracker(raw_tracker: dict) -> dict:
+    """Parse the issueTracker config section.
+
+    Handles the 4 type values (jira-mcp, jira-api, github-mcp, github-api)
+    and splits into platform + api_mode for internal use.
+    """
+    raw_type = raw_tracker.get("type", "jira-mcp")
+    if raw_type not in _TRACKER_TYPE_MAP:
+        raise ValueError(
+            f"Unknown issue tracker type: '{raw_type}'. "
+            f"Supported: {', '.join(_TRACKER_TYPE_MAP.keys())}"
+        )
+    platform, api_mode = _TRACKER_TYPE_MAP[raw_type]
+
+    return {
+        "type": raw_type,
+        "platform": platform,       # "jira" or "github-issues"
+        "api_mode": api_mode,        # "mcp" or "api"
+        "trigger_status": raw_tracker.get("triggerStatus", "Ready for Development"),
+        "development_status": raw_tracker.get("developmentStatus", "Development"),
+        "done_status": raw_tracker.get("doneStatus", "Done"),
+        "blocked_status": raw_tracker.get("blockedStatus", "Blocked"),
+        "bot_users": raw_tracker.get("botUsers", []),
+    }
+
 
 def load() -> dict:
     """
@@ -59,14 +96,7 @@ def load() -> dict:
             "clone_dir": raw.get("repo", {}).get("cloneDir", "/tmp/auto-pilot-repos"),
             "base_branch": raw.get("repo", {}).get("baseBranch", "main"),
         },
-        "issue_tracker": {
-            "type": raw.get("issueTracker", {}).get("type", "jira"),
-            "trigger_status": raw.get("issueTracker", {}).get("triggerStatus", "Ready for Development"),
-            "development_status": raw.get("issueTracker", {}).get("developmentStatus", "Development"),
-            "done_status": raw.get("issueTracker", {}).get("doneStatus", "Done"),
-            "blocked_status": raw.get("issueTracker", {}).get("blockedStatus", "Blocked"),
-            "bot_users": raw.get("issueTracker", {}).get("botUsers", []),
-        },
+        "issue_tracker": _parse_issue_tracker(raw.get("issueTracker", {})),
         "git_provider": {
             "type": raw.get("gitProvider", {}).get("type", "gitlab"),
             "bot_users": raw.get("gitProvider", {}).get("botUsers", []),

@@ -23,6 +23,23 @@ __PIPELINE_RESULT__:{"blocked":true,"reason":"<explanation of what information i
 
 This line MUST appear in your output. The pipeline server reads it to determine next steps. If you do not output this line, the pipeline cannot advance.
 
+## API Mode
+
+Your input includes an `apiMode` field: either `"mcp"` or `"api"`.
+
+**When `apiMode` is `"mcp"`:**
+- YOU read the ticket from the issue tracker using MCP tools (getJiraIssue, etc.)
+- YOU post comments on the ticket using MCP tools
+- YOU transition ticket status using MCP tools
+- The Python server does NOT call the issue tracker — everything goes through you
+
+**When `apiMode` is `"api"`:**
+- The Python server has ALREADY read the ticket and passed it as `ticketData` in your input
+- The Python server handles ALL ticket transitions and status comments
+- **DO NOT use any issue tracker MCP tools** (no getJiraIssue, addCommentToJiraIssue, transitionJiraIssue, etc.)
+- Use the `ticketData` object from your input instead of reading the ticket yourself
+- You may still post detailed analysis/plan comments via MCP if available, but the server handles status comments
+
 ## Input
 
 You receive a JSON input with an `action` field and action-specific fields.
@@ -31,49 +48,47 @@ You receive a JSON input with an `action` field and action-specific fields.
 
 ### Action: analyze
 
-Fields: `issueKey`, `branch`, `summary`, `projectKey`, `baseBranch`, `statuses`
+Fields: `issueKey`, `branch`, `summary`, `projectKey`, `baseBranch`, `statuses`, `apiMode`, `ticketData` (only in api mode)
 
 **Steps:**
-1. Read the full ticket using the issue tracker MCP with **ALL fields**:
-   - Use `getJiraIssue` with all fields (summary, description, status, priority, labels, components, attachments, comments, linked issues, AND all custom fields)
-   - Fetch attachments list — if there are design mockups or spec documents, note them in TICKET.md
-   - Read existing comments on the ticket for additional context
-   - Check linked issues and pull their summaries for context
+1. **Get ticket details:**
+   - If `apiMode` is `"mcp"`: Read the full ticket using the issue tracker MCP with **ALL fields** (summary, description, status, priority, labels, components, attachments, comments, linked issues, custom fields)
+   - If `apiMode` is `"api"`: Use the `ticketData` object from your input — it already contains all ticket fields read by the Python server. **Do NOT call issue tracker MCP tools.**
 2. **Evaluate if the ticket has sufficient detail** (see RULES.md "Insufficient Ticket Details" section):
-   - If insufficient: post a comment on the ticket explaining what's missing, then output `__PIPELINE_RESULT__:{"blocked":true,"reason":"<what is missing>"}` and **STOP**
+   - If insufficient and `apiMode` is `"mcp"`: post a comment on the ticket via MCP, then output `__PIPELINE_RESULT__:{"blocked":true,"reason":"<what is missing>"}` and **STOP**
+   - If insufficient and `apiMode` is `"api"`: just output `__PIPELINE_RESULT__:{"blocked":true,"reason":"<what is missing>"}` and **STOP** (server posts the comment)
    - If sufficient: continue to step 3
 3. Create the feature branch from `baseBranch` using the git provider MCP (`create_branch`)
-4. Write `TICKET.md` to the branch root with the full ticket context:
+4. Write `TICKET.md` to the branch root with the full ticket context (from MCP data or ticketData):
    - Issue key and summary
-   - Full description (from description field AND any relevant custom fields)
-   - Acceptance criteria (from any field where they appear)
+   - Full description
+   - Acceptance criteria
    - Attachments list with descriptions
    - Linked issues with summaries (if any)
    - Design notes (if any)
 5. Commit `TICKET.md` to the feature branch using the git provider MCP (`commit_files`)
-6. Post a Jira comment with the analysis summary:
-   - Scope of the ticket as understood
-   - Key requirements identified
-   - Relevant existing files/patterns found in codebase
-7. Output `__PIPELINE_RESULT__:{"blocked":false}`
+6. **Post analysis comment:**
+   - If `apiMode` is `"mcp"`: Post a comment on the ticket via issue tracker MCP with: scope, key requirements, relevant files
+   - If `apiMode` is `"api"`: Skip — the Python server posts status comments
+7. If `apiMode` is `"mcp"`: Transition ticket to Development status via MCP
+8. Output `__PIPELINE_RESULT__:{"blocked":false}`
 
 ### Action: plan
 
-Fields: `issueKey`, `branch`, `statuses`
+Fields: `issueKey`, `branch`, `statuses`, `apiMode`
 
 **Steps:**
 1. Invoke the **brainstorm** agent with the issue key and branch name
 2. After the brainstorm agent completes, read `PLAN.md` from the branch root
-3. If the plan reveals fundamental blockers (e.g. required external service not available, massive scope that needs decomposition): output `__PIPELINE_RESULT__:{"blocked":true,"reason":"<details>"}` and **STOP**
-4. Post a Jira comment with the plan summary:
-   - Chosen approach and why
-   - File changes planned
-   - Key implementation notes
+3. If the plan reveals fundamental blockers: output `__PIPELINE_RESULT__:{"blocked":true,"reason":"<details>"}` and **STOP**
+4. **Post plan comment:**
+   - If `apiMode` is `"mcp"`: Post a comment on the ticket via issue tracker MCP with: chosen approach, file changes, implementation notes
+   - If `apiMode` is `"api"`: Skip — the Python server posts status comments
 5. Output `__PIPELINE_RESULT__:{"blocked":false}`
 
 ### Action: implement
 
-Fields: `issueKey`, `branch`, `summary`, `baseBranch`, `statuses`
+Fields: `issueKey`, `branch`, `summary`, `baseBranch`, `statuses`, `apiMode`
 
 **Steps:**
 1. Checkout the feature branch: `git checkout {branch}`
@@ -86,19 +101,23 @@ Fields: `issueKey`, `branch`, `summary`, `baseBranch`, `statuses`
    - Title: `feat({issueKey}): {summary}`
    - Description: include a summary of PLAN.md, link to the ticket, and the file change list
    - Target branch: use `baseBranch` from input
-6. Post a comment on the ticket with the MR/PR link
+6. **Post MR link comment:**
+   - If `apiMode` is `"mcp"`: Post a comment on the ticket via issue tracker MCP with the MR/PR link
+   - If `apiMode` is `"api"`: Skip — the Python server posts the completion comment
 7. Output `__PIPELINE_RESULT__:{"blocked":false}`
 
 ### Action: rework
 
-Fields: `issueKey`, `branch`, `statuses`
+Fields: `issueKey`, `branch`, `statuses`, `apiMode`
 
 **Steps:**
-1. Checkout the feature branch: `git checkout {branch}`
+1. Checkout the feature branch: `git checkout {branch}` (same branch as original MR)
 2. Read `FEEDBACK.md` from the branch root (written by the feedback-parser agent)
 3. Invoke the **developer** agent with `issueKey`, `branch`, and `mode: "rework"`
 4. After the developer agent completes, **push the branch to remote**: `git push origin {branch}`
-5. Post a comment on the ticket: "Rework completed based on review feedback"
+5. **Post rework comment:**
+   - If `apiMode` is `"mcp"`: Post a comment on the ticket via issue tracker MCP
+   - If `apiMode` is `"api"`: Skip — the Python server posts the completion comment
 6. Output `__PIPELINE_RESULT__:{"blocked":false}`
 
 ### Action: merge-approved

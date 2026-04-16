@@ -55,6 +55,22 @@ class IssueTrackerBase(ABC):
         ...
 
     @abstractmethod
+    def read_issue(self, issue_key: str) -> dict:
+        """Read full issue details from the tracker.
+
+        Used in API mode so the Python server can read the ticket
+        and pass it to the agent without requiring MCP.
+
+        Args:
+            issue_key: Issue identifier (e.g. "PROJ-123").
+
+        Returns:
+            Dict with keys: summary, description, acceptance_criteria,
+            components, labels, priority, linked_issues, comments, attachments.
+        """
+        ...
+
+    @abstractmethod
     def transition_issue(self, issue_key: str, status_name: str) -> None:
         """Transition an issue to a new status.
 
