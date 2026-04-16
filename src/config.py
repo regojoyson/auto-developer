@@ -89,6 +89,7 @@ def load() -> dict:
             "max_rework_iterations": raw.get("pipeline", {}).get("maxReworkIterations", 3),
             "agent_timeout": raw.get("pipeline", {}).get("agentTimeout", 300000),
             "port": raw.get("pipeline", {}).get("port", 3000),
+            "output_handlers": raw.get("pipeline", {}).get("outputHandlers", ["file", "memory"]),
         },
     }
     return _cache

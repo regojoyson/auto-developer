@@ -81,10 +81,18 @@ NOTIFICATION_PROVIDERS = [
     questionary.Choice("Slack", value="slack"),
 ]
 
+# ─── Output Handlers ─────────────────────────────────────
+
+OUTPUT_HANDLERS = [
+    questionary.Choice("File — logs/agents/ (tail -f)", value="file"),
+    questionary.Choice("Memory — API /api/status/{key}/logs", value="memory"),
+]
+
 # ─── Pipeline Defaults ───────────────────────────────────
 
 PIPELINE_DEFAULTS = {
     "port": "3000",
     "max_rework": "3",
     "timeout_seconds": "300",
+    "output_handlers": ["file", "memory"],
 }

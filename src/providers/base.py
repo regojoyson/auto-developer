@@ -226,6 +226,69 @@ class CliAdapterBase(ABC):
         ...
 
 
+class OutputHandlerBase(ABC):
+    """Base class for agent output handlers.
+
+    Output handlers receive real-time streaming output from agent CLI
+    processes. Multiple handlers can be active at once (fan-out pattern).
+
+    Built-in handlers: FileHandler (log files), MemoryHandler (API).
+    Add custom handlers (websocket, webhook, etc.) by extending this class.
+
+    Subclasses must define:
+        - name (str): Handler identifier (e.g. "file", "memory")
+    """
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Handler identifier (e.g. 'file', 'memory')."""
+        ...
+
+    def on_start(self, issue_key: str, agent_name: str, cwd: str) -> None:
+        """Called when an agent process starts.
+
+        Args:
+            issue_key: Ticket identifier (e.g. "PROJ-42").
+            agent_name: Agent name (e.g. "orchestrator").
+            cwd: Working directory of the agent process.
+        """
+        pass
+
+    def on_output(self, issue_key: str, agent_name: str, line: str, stream: str) -> None:
+        """Called for each line of output from the agent process.
+
+        Args:
+            issue_key: Ticket identifier.
+            agent_name: Agent name.
+            line: Single line of output text.
+            stream: Which stream — "stdout" or "stderr".
+        """
+        pass
+
+    def on_finish(self, issue_key: str, agent_name: str, exit_code: int) -> None:
+        """Called when the agent process exits.
+
+        Args:
+            issue_key: Ticket identifier.
+            agent_name: Agent name.
+            exit_code: Process exit code (0 = success).
+        """
+        pass
+
+    def get_output(self, issue_key: str, agent_name: str | None = None) -> str:
+        """Retrieve captured output for an issue/agent.
+
+        Args:
+            issue_key: Ticket identifier.
+            agent_name: Optional agent name to filter. If None, returns all.
+
+        Returns:
+            Captured output text, or empty string if not available.
+        """
+        return ""
+
+
 class NotificationBase(ABC):
     """Base class for notification adapters.
 

@@ -27,6 +27,7 @@ from installer.choices import (
     REPO_MODES, ISSUE_TRACKERS, ISSUE_TRACKER_DEFAULTS,
     GIT_PROVIDERS, GIT_PROVIDER_ENV, GIT_PROVIDER_BOTS,
     CLI_ADAPTERS, NOTIFICATION_PROVIDERS, PIPELINE_DEFAULTS,
+    OUTPUT_HANDLERS,
 )
 from rich.console import Console
 from rich.panel import Panel
@@ -375,7 +376,7 @@ def ask_notification(total_steps: int) -> dict | None:
 def ask_pipeline(total_steps: int) -> dict:
     """Step 6: Pipeline runtime settings."""
     step(6, total_steps, "Pipeline Settings",
-         "Configure the webhook server port, rework limits, and agent timeouts.")
+         "Configure the webhook server port, rework limits, agent timeouts, and output visibility.")
 
     info("The webhook server listens for events from your issue tracker and git provider.")
     port = questionary.text("Server port:", default=PIPELINE_DEFAULTS["port"], style=STYLE).ask()
@@ -390,10 +391,27 @@ def ask_pipeline(total_steps: int) -> dict:
     info("Complex tickets may need more time. Default is 5 minutes (300s).")
     timeout = questionary.text("Agent timeout (seconds):", default=PIPELINE_DEFAULTS["timeout_seconds"], style=STYLE).ask()
 
+    console.print()
+    info("Output handlers control where you can see what agents are doing in real-time.")
+    info("  • [bold]File[/bold] — writes to logs/agents/ (use [cyan]tail -f[/cyan] to watch)")
+    info("  • [bold]Memory[/bold] — serves via API ([cyan]/api/status/{'{key}'}/logs[/cyan])")
+    info("Select one or both:")
+    output_handlers = questionary.checkbox(
+        "Output handlers:",
+        choices=OUTPUT_HANDLERS,
+        default=PIPELINE_DEFAULTS["output_handlers"],
+        style=STYLE,
+    ).ask()
+
+    if not output_handlers:
+        warn("No output handlers selected — you won't see agent output anywhere")
+        output_handlers = []
+
     return {
         "port": int(port),
         "maxReworkIterations": int(max_rework),
         "agentTimeout": int(timeout) * 1000,
+        "outputHandlers": output_handlers,
     }
 
 

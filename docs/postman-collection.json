@@ -63,6 +63,22 @@
           }
         },
         {
+          "name": "Get Agent Logs",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/status/PROJ-42/logs",
+            "description": "Get real-time agent output for a pipeline. Shows what the agents are doing right now. Replace PROJ-42 with your issue key."
+          }
+        },
+        {
+          "name": "Get Agent Logs (specific agent)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/status/PROJ-42/logs?agent=orchestrator",
+            "description": "Get output for a specific agent only. Agents: orchestrator, brainstorm, developer, feedback-parser."
+          }
+        },
+        {
           "name": "Cancel Pipeline",
           "request": {
             "method": "DELETE",

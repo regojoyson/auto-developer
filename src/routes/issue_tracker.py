@@ -78,7 +78,8 @@ async def handle_webhook(request: Request):
     })
 
     threading.Thread(
-        target=run_agent, args=("orchestrator", input_data), kwargs={"cwd": repo_dir}, daemon=True
+        target=run_agent, args=("orchestrator", input_data),
+        kwargs={"cwd": repo_dir, "issue_key": issue_key}, daemon=True
     ).start()
 
     return {"accepted": True, "issueKey": issue_key, "branch": branch, "repoDir": repo_dir}

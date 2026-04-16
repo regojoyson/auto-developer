@@ -35,7 +35,9 @@ def _run_async(agent, input_data, cwd):
         input_data: JSON-encoded input string for the agent.
         cwd: Working directory for the agent process.
     """
-    threading.Thread(target=run_agent, args=(agent, input_data), kwargs={"cwd": cwd}, daemon=True).start()
+    import json as _json
+    _ik = _json.loads(input_data).get("issueKey", "unknown")
+    threading.Thread(target=run_agent, args=(agent, input_data), kwargs={"cwd": cwd, "issue_key": _ik}, daemon=True).start()
 
 
 @router.post("/")
