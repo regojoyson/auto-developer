@@ -298,9 +298,23 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
     _log_step(issue_key, f"Preparing repo — stash, checkout {base_branch}, pull latest...")
     _prepare_repo_for_branch(repo_dir, base_branch)
 
-    # ── Step 2: Transition ticket to Development ─────────
+    # ── Step 2: Transition ticket to Development (CRITICAL — pipeline stops on failure)
     _log_step(issue_key, f"Transitioning ticket to '{statuses['development']}'...")
-    _try_transition_issue(issue_key, statuses["development"])
+    try:
+        adapter, _ = get_issue_tracker()
+        adapter.transition_issue(issue_key, statuses["development"])
+        _log_step(issue_key, f"Ticket transitioned to '{statuses['development']}' successfully")
+    except Exception as e:
+        error_msg = str(e)
+        _log_step(issue_key, f"CRITICAL: Failed to transition ticket — {error_msg}")
+        logger.error(f"{issue_key}: Cannot transition to '{statuses['development']}': {error_msg}")
+        transition_state(branch, "failed", error={
+            "phase": "analyzing",
+            "agent": "pipeline",
+            "message": f"Failed to transition ticket to '{statuses['development']}': {error_msg}",
+        })
+        _try_notify_slack(f"{issue_key} pipeline failed — could not transition ticket to '{statuses['development']}'")
+        return
 
     # ── Step 3: Phase 1 — Analyze ────────────────────────
     # Agent reads ticket, creates feature branch, writes TICKET.md, posts analysis comment
@@ -400,9 +414,24 @@ def run_rework_phases(issue_key, branch, pr_id, statuses, repo_dir):
     _log_step(issue_key, f"Checking out feature branch {branch} (same branch as MR)...")
     _prepare_repo_for_branch(repo_dir, base_branch, feature_branch=branch)
 
-    # ── Step 2: Transition ticket to Development ─────────
+    # ── Step 2: Transition ticket to Development (CRITICAL — rework stops on failure)
     _log_step(issue_key, f"Transitioning ticket to '{statuses['development']}'...")
-    _try_transition_issue(issue_key, statuses["development"])
+    try:
+        adapter, _ = get_issue_tracker()
+        adapter.transition_issue(issue_key, statuses["development"])
+        _log_step(issue_key, f"Ticket transitioned to '{statuses['development']}' successfully")
+    except Exception as e:
+        error_msg = str(e)
+        _log_step(issue_key, f"CRITICAL: Failed to transition ticket — {error_msg}")
+        logger.error(f"{issue_key}: Cannot transition to '{statuses['development']}': {error_msg}")
+        transition_state(branch, "failed", error={
+            "phase": "reworking",
+            "agent": "pipeline",
+            "message": f"Failed to transition ticket to '{statuses['development']}': {error_msg}",
+        })
+        _try_notify_slack(f"{issue_key} rework failed — could not transition ticket to '{statuses['development']}'")
+        return
+
     _log_step(issue_key, "Transitioning state: awaiting-review → reworking")
     transition_state(branch, "reworking")
 
