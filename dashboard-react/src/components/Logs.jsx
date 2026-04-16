@@ -55,16 +55,9 @@ export default function Logs() {
             onChange={(e) => setAgent(e.target.value)}
             className="border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
-            <option value="all">All Phases</option>
-            <optgroup label="Pipeline Phases">
-              <option value="orchestrator">Phase 1 — Analyze</option>
-              <option value="orchestrator:plan">Phase 2 — Plan</option>
-              <option value="orchestrator:implement">Phase 3 — Implement</option>
-            </optgroup>
-            <optgroup label="Rework">
-              <option value="feedback-parser">Feedback Parser</option>
-              <option value="orchestrator:rework">Rework — Apply Fixes</option>
-            </optgroup>
+            <option value="all">All Logs</option>
+            <option value="orchestrator">Pipeline (Analyze + Plan + Implement)</option>
+            <option value="feedback-parser">Feedback Parser</option>
           </select>
         </div>
       </div>
