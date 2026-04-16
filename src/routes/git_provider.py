@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request
 
 from src.config import config
 from src.state.manager import get_state, transition_state, is_rework_limit_exceeded, list_active_states
-from src.agents.runner import run_agent
+from src.executor.runner import run_agent
 from src.providers.git_provider import get_git_provider
 
 logger = logging.getLogger(__name__)

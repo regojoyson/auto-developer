@@ -119,7 +119,7 @@ auto-developer/
 │   │   └── notifications/       # Slack
 │   ├── state/manager.py         # Pipeline state machine
 │   ├── repos/resolver.py        # Repo resolver (3 modes)
-│   └── agents/runner.py         # CLI process spawner
+│   └── executor/runner.py       # Spawns AI coding CLI processes
 ├── mcp_servers/                 # GitLab + GitHub MCP servers (Python)
 ├── docs/                        # All documentation + diagrams
 ├── requirements.txt             # Python dependencies

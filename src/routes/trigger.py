@@ -9,7 +9,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from src.state.manager import get_state, create_state
-from src.agents.runner import run_agent
+from src.executor.runner import run_agent
 from src.repos.resolver import get_repo_dir, prepare_repo, get_base_branch
 
 logger = logging.getLogger(__name__)

@@ -8,7 +8,7 @@ import threading
 from fastapi import APIRouter, Request
 
 from src.state.manager import get_state, create_state
-from src.agents.runner import run_agent
+from src.executor.runner import run_agent
 from src.repos.resolver import get_repo_dir, prepare_repo, get_base_branch
 from src.providers.issue_tracker import get_issue_tracker
 
