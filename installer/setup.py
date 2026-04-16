@@ -667,28 +667,84 @@ def main():
     # Done — show next steps
     console.print()
 
-    next_steps = [
-        "[bold]What happens next:[/bold]",
-        "",
-    ]
-
-    # Check what's missing
+    # ─── MCP Servers Panel ────────────────────────────────
+    # Show a dedicated panel FIRST so the user sees what they need to configure
     cmd_map = {"claude-code": "claude", "codex": "codex", "gemini": "gemini"}
     cli_cmd = cmd_map.get(cli_config["type"], "claude")
-    if not shutil.which(cli_cmd):
-        next_steps.append(f"  1. [yellow]Install {cli_config['type']}[/yellow] — the '{cli_cmd}' command is not found yet")
-        next_steps.append(f"  2. Run [cyan]./start.sh[/cyan] to start the pipeline")
-    else:
-        next_steps.append(f"  1. Run [cyan]./start.sh[/cyan] to start the pipeline")
+    git_label = "GitLab" if git_config["type"] == "gitlab" else "GitHub"
+    pr_label = "MRs" if git_config["type"] == "gitlab" else "PRs"
 
+    mcp_table = Table(
+        title="MCP Servers for Your Config",
+        show_header=True, header_style="bold cyan",
+        border_style="cyan", expand=True,
+        title_style="bold white",
+    )
+    mcp_table.add_column("MCP Server", style="bold")
+    mcp_table.add_column("Status", justify="center")
+    mcp_table.add_column("Purpose")
+    mcp_table.add_column("Action Required")
+
+    # Git MCP — always built-in
+    mcp_table.add_row(
+        f"{git_label} MCP",
+        "[green]Built-in[/green]",
+        f"Branches, commits, {pr_label}, comments",
+        "[dim]None — auto-configured by start.sh[/dim]",
+    )
+
+    # Issue tracker MCP
     if tracker_config["type"] == "jira":
-        next_steps.append(f"  {'2' if shutil.which(cli_cmd) else '3'}. Configure Jira MCP in your CLI (see docs/prerequisites.md)")
+        mcp_table.add_row(
+            "Jira MCP",
+            "[yellow]Configure[/yellow]",
+            "Read tickets, post comments",
+            f"[yellow]Add to {cli_config['type']} CLI settings[/yellow]\nSee docs/prerequisites.md",
+        )
+    elif tracker_config["type"] == "github-issues":
+        mcp_table.add_row(
+            "GitHub Issues",
+            "[green]Built-in[/green]",
+            "Read issues, post comments",
+            "[dim]Uses GitHub token from .env[/dim]",
+        )
+
+    # Slack MCP — only if notifications enabled
+    if notif_config:
+        mcp_table.add_row(
+            "Slack MCP",
+            "[yellow]Configure[/yellow]",
+            f"Notifications → #{notif_config.get('channel', 'general')}",
+            f"[yellow]Add to {cli_config['type']} CLI settings[/yellow]\nSee docs/prerequisites.md",
+        )
+
+    console.print()
+    console.print(Panel(mcp_table, border_style="cyan"))
+
+    # ─── Next Steps Panel ────────────────────────────────
+    step_num = 1
+    next_steps = []
+
+    if not shutil.which(cli_cmd):
+        next_steps.append(f"  {step_num}. [yellow]Install {cli_config['type']}[/yellow] — '{cli_cmd}' not found")
+        step_num += 1
+
+    # Only show MCP setup steps if there are items to configure
+    if tracker_config["type"] == "jira":
+        next_steps.append(f"  {step_num}. Configure [cyan]Jira MCP[/cyan] in your CLI  [dim](see table above)[/dim]")
+        step_num += 1
+    if notif_config:
+        next_steps.append(f"  {step_num}. Configure [cyan]Slack MCP[/cyan] in your CLI  [dim](see table above)[/dim]")
+        step_num += 1
+
+    next_steps.append(f"  {step_num}. Run [cyan]./start.sh[/cyan] to start the pipeline")
+    step_num += 1
 
     next_steps.extend([
         "",
-        f"  Configure webhooks pointing to [cyan]http://<your-host>:{pipeline_config['port']}[/cyan]",
-        f"    Issue tracker:  /webhooks/issue-tracker",
-        f"    Git provider:   /webhooks/git",
+        f"  {step_num}. Configure webhooks:",
+        f"     Issue tracker:  [cyan]http://<your-host>:{pipeline_config['port']}/webhooks/issue-tracker[/cyan]",
+        f"     Git provider:   [cyan]http://<your-host>:{pipeline_config['port']}/webhooks/git[/cyan]",
         "",
         "  Or trigger manually:",
         f"    curl -X POST http://localhost:{pipeline_config['port']}/api/trigger \\",
@@ -698,7 +754,7 @@ def main():
 
     console.print(Panel(
         "\n".join(next_steps),
-        title="[bold green]Setup Complete![/bold green]",
+        title="[bold green]Setup Complete — Next Steps[/bold green]",
         border_style="green",
     ))
     console.print()
