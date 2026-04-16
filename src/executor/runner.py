@@ -82,7 +82,7 @@ def run_agent(
     adapter, cli_config = get_cli_adapter()
     handlers = get_output_handlers()
 
-    timeout = (timeout_ms or cli_config.get("timeout") or config["pipeline"]["agent_timeout"]) / 1000
+    timeout = (timeout_ms or config["pipeline"]["agent_timeout"]) / 1000
     command = cli_config.get("command") or adapter.default_command
     prompted_input = AUTONOMY_PREAMBLE + input_text
     args = adapter.build_args(agent_name, prompted_input, cli_config)

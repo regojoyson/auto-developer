@@ -101,6 +101,14 @@ def link_agents(config: dict) -> None:
     dirs = get_cli_dirs(cli_type)
     repo_dirs = resolve_repo_dirs(config)
 
+    # For parentDir mode, also link into the parent directory itself.
+    # The resolver returns the parent when no component is specified,
+    # so the CLI needs agent files there too.
+    if config["repo"]["mode"] == "parentDir":
+        parent = config["repo"]["path"]
+        if parent and parent not in repo_dirs:
+            repo_dirs = [parent] + repo_dirs
+
     if not repo_dirs:
         console.print("  [yellow]No repo directories found — check config.yaml[/yellow]")
         return
