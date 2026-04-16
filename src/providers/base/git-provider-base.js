@@ -60,7 +60,7 @@ class GitProviderBase {
    *
    * @param {object} headers - HTTP request headers
    * @param {object} payload - Webhook JSON body
-   * @param {object} config - gitProvider section from providers.json
+   * @param {object} config - gitProvider section from config.yaml
    * @returns {{ event: 'approved'|'push'|'comment', branch: string|null, prId: string|number|null, author: string }|null}
    * @abstract
    */

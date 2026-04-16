@@ -2,7 +2,7 @@
  * @module webhook/routes/git-provider
  * @description Unified webhook handler for any git provider (GitLab, GitHub, etc.).
  *
- * Delegates payload parsing to the configured adapter from providers.json.
+ * Delegates payload parsing to the configured adapter from config.yaml.
  * Routes three event types:
  *   - approved → transition to merged, notify
  *   - push    → log human edit, wait

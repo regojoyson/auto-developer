@@ -1,4 +1,4 @@
-[< Back to README](../README.md) | [Setup](setup.md) | [How It Works](how-it-works.md) | [Configuration](configuration.md) | [API Spec](api-spec.md) | [OpenAPI](openapi.yaml) | [Spec](spec.md)
+[< Back to README](../README.md) | [Prerequisites](prerequisites.md) | [Setup](setup.md) | [How It Works](how-it-works.md) | [Configuration](configuration.md) | [API Spec](api-spec.md)
 
 ---
 

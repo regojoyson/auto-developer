@@ -3,7 +3,7 @@
  * @description Spawns AI coding CLI agent processes using the configured adapter.
  *
  * The CLI adapter (Claude Code, Codex, Gemini, etc.) is selected via
- * `providers.json` → `cliAdapter.type`. The adapter handles argument
+ * `config.yaml` → `cliAdapter.type`. The adapter handles argument
  * construction and output parsing — this module handles process lifecycle.
  *
  * @example

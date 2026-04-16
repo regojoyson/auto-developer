@@ -49,7 +49,7 @@ class IssueTrackerBase {
    *
    * @param {object} headers - HTTP request headers
    * @param {object} payload - Webhook JSON body
-   * @param {object} config - issueTracker section from providers.json
+   * @param {object} config - issueTracker section from config.yaml
    * @returns {{ issueKey: string, summary: string, component: string|null }|null}
    *   Parsed event data, or null if the event should be ignored.
    * @abstract

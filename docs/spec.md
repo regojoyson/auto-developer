@@ -1,4 +1,4 @@
-[< Back to README](../README.md) | [Setup](setup.md) | [How It Works](how-it-works.md) | [Configuration](configuration.md) | [API Spec](api-spec.md) | [OpenAPI](openapi.yaml) | [Custom Providers](custom-providers.md)
+[< Back to README](../README.md) | [Prerequisites](prerequisites.md) | [Setup](setup.md) | [How It Works](how-it-works.md) | [Configuration](configuration.md) | [API Spec](api-spec.md) | [Custom Providers](custom-providers.md)
 
 ---
 
@@ -291,32 +291,48 @@ This means the local clone provides context but the agent's changes go directly 
 
 ## 12.1 Multi-Repo Support
 
-The pipeline supports two directory modes via `repos.json`:
+The pipeline supports three repo modes via `config.yaml`:
 
-### Single Repo (Mono-Repo)
+### dir — Single Repo
 
-One repo directory — all tickets run agents here.
-
-```json
-{ "mode": "single", "single": { "repoDir": "/projects/my-app" } }
+```yaml
+repo:
+  mode: dir
+  path: /projects/my-app
+  baseBranch: main
 ```
 
-### Multi Repo
+### parentDir — Multiple Repos
 
-A parent directory where every subdirectory is a separate repo.
-
-```json
-{ "mode": "multi", "multi": { "parentDir": "/projects" } }
+```yaml
+repo:
+  mode: parentDir
+  path: /projects
+  baseBranch: main
 ```
 
 ```
-/projects/              <-- parentDir
+/projects/
   ├── frontend-app/
   ├── backend-api/
   └── shared-libs/
 ```
 
-In multi mode, the Jira ticket's **component** field selects the subdirectory. The agent runs with `cwd` set to that repo so it reads the correct codebase. The `repoPath` is stored in the pipeline state so all later events (approve, comment, rework) also run in the correct directory.
+The ticket's component field selects the subdirectory.
+
+### clone — Clone from URL(s)
+
+```yaml
+repo:
+  mode: clone
+  urls:
+    - https://github.com/org/frontend.git
+    - https://github.com/org/backend.git
+  cloneDir: /tmp/auto-pilot-repos
+  baseBranch: develop
+```
+
+Repos are cloned on first ticket and reused after. On each new ticket, the pipeline runs `git stash`, checks out `baseBranch`, and resets to origin.
 
 ---
 

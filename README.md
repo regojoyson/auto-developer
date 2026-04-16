@@ -58,6 +58,7 @@ Everything is swappable via a single `config.yaml`. Add your own providers by ex
 git clone https://github.com/regojoyson/auto-developer.git
 cd auto-developer
 
+# 0. Check prerequisites first: docs/prerequisites.md
 ./setup.sh     # interactive wizard — generates config
 # fill in tokens in .env
 ./start.sh     # validates, starts server + ngrok
@@ -85,6 +86,7 @@ curl http://localhost:3000/api/status/PROJ-42
 
 | Doc | What it covers |
 |-----|---------------|
+| **[Prerequisites](docs/prerequisites.md)** | What to install before starting (Node, CLI, MCP servers, tokens) |
 | **[Setup Guide](docs/setup.md)** | Step-by-step from zero to running |
 | **[How It Works](docs/how-it-works.md)** | Full pipeline flow, agents, review loop |
 | **[Configuration](docs/configuration.md)** | All `config.yaml` options with examples |

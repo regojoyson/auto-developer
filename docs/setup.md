@@ -1,4 +1,4 @@
-[< Back to README](../README.md) | [How It Works](how-it-works.md) | [Configuration](configuration.md) | [API Spec](api-spec.md) | [OpenAPI](openapi.yaml) | [Custom Providers](custom-providers.md) | [Spec](spec.md)
+[< Back to README](../README.md) | [Prerequisites](prerequisites.md) | [How It Works](how-it-works.md) | [Configuration](configuration.md) | [API Spec](api-spec.md) | [Custom Providers](custom-providers.md)
 
 ---
 
@@ -10,12 +10,19 @@ Get auto-pilot running from zero.
 
 ## Prerequisites
 
+Before starting, make sure you have everything installed and configured.
+See the full checklist: **[prerequisites.md](prerequisites.md)**
+
+Key items:
 - **Node.js** >= 18
-- **Claude Code CLI** (or Codex/Gemini CLI) installed and authenticated
+- **AI Coding CLI** installed and authenticated (Claude Code / Codex / Gemini)
 - **Git** installed
-- A **Jira** project or **GitHub** repo with issues
-- A **GitLab** or **GitHub** repo for code
-- **ngrok** (optional, for development webhook tunneling)
+- **Git provider token** (GitLab or GitHub)
+- **Jira MCP configured in your CLI** (if using Jira as issue tracker)
+- **Slack MCP configured in your CLI** (if using Slack notifications)
+- **ngrok** (optional, for webhook tunneling)
+
+**Important:** The Jira and Slack MCP servers are configured in your CLI tool (e.g. `~/.claude/settings.json`), not in Auto Developer. See [prerequisites.md](prerequisites.md) for setup instructions.
 
 ---
 

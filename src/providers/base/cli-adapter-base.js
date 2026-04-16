@@ -76,7 +76,7 @@ class CliAdapterBase {
    *
    * @param {string} agentName - Agent name (e.g. 'orchestrator', 'brainstorm')
    * @param {string} input - JSON string input to pass to the agent
-   * @param {object} config - cliAdapter section from providers.json
+   * @param {object} config - cliAdapter section from config.yaml
    * @returns {string[]} Array of CLI arguments
    * @abstract
    */
@@ -89,7 +89,7 @@ class CliAdapterBase {
    * Default implementation: merge base env with config.env overrides.
    *
    * @param {object} baseEnv - Current process.env
-   * @param {object} config - cliAdapter section from providers.json
+   * @param {object} config - cliAdapter section from config.yaml
    * @returns {object} Environment variables for the child process
    */
   buildEnv(baseEnv, config) {
