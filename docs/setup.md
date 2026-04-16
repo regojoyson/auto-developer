@@ -41,35 +41,35 @@ cd auto-developer
 ./setup.sh
 ```
 
-The wizard asks:
+The wizard runs a **pre-flight check** first (detects installed tools), then walks through 7 steps:
 
-```
-? Where is your code?
-  1) Local directory (one repo)
-  2) Parent directory (multiple repos)
-  3) Clone from git URL(s)
-
-? Git provider: (gitlab / github)
-? Issue tracker: (jira / github-issues)
-? AI coding CLI: (claude-code / codex / gemini)
-? Base branch to create features from: (main)
-? Enable notifications? (y/n)
-```
+1. **Repository** — where your code is + base branch
+2. **Issue tracker** — Jira / GitHub Issues + trigger status
+3. **Git provider** — GitLab / GitHub + API token (masked, stored in .env)
+4. **AI coding CLI** — Claude Code / Codex / Gemini + optional model
+5. **Notifications** — optional Slack channel
+6. **Pipeline settings** — port, rework limit, timeout, output handlers
+7. **Summary** → confirm → write files
 
 This generates:
-- **`config.yaml`** — all settings (repo, providers, pipeline)
-- **`.env`** — token placeholders
-
-It also symlinks agent files into your target repo(s):
-- Creates `.auto-developer/` symlink (reference to our agent configs)
-- Symlinks each agent `.md` file into the CLI's agent directory (e.g. `.claude/agents/`)
-- Symlinks `CLAUDE.md` into the CLI's config directory
-
-This works even if your repo already has a `.claude/` directory — we only add individual files, never overwrite the whole directory.
+- **`config.yaml`** — all settings
+- **`.env`** — API tokens only (project IDs auto-detected from git remote)
+- Symlinks agent `.md` files into the CLI's agent directory
+- Works even if your repo already has a `.claude/` directory
 
 If you prefer to write `config.yaml` by hand, see [configuration.md](configuration.md).
 
-If you already have a `config.yaml` and re-run `./setup.sh`, it asks if you want to reconfigure or keep the existing config.
+### Re-running the wizard
+
+If `config.yaml` already exists, the wizard offers three options:
+
+| Option | What it does |
+|--------|-------------|
+| **Re-link only** | Keep current config, just re-symlink agent files |
+| **Reconfigure** | Edit current settings — all values pre-filled with your existing config. Press Enter to keep a value, type to change it. |
+| **Start fresh** | Blank config from scratch (old config backed up to `.yaml.bak`) |
+
+For token fields, the wizard shows a hint like `(current: V96I****)` and preserves the old value if you just press Enter.
 
 ---
 

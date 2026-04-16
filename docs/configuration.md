@@ -193,13 +193,22 @@ notification:
 | `maxReworkIterations` | number | No | `3` | Max feedback/rework cycles before escalation |
 | `agentTimeout` | number | No | `300000` | Default agent process timeout in ms (5 min) |
 | `port` | number | No | `3000` | Webhook server port |
+| `outputHandlers` | string[] | No | `[file, memory]` | Where to stream agent output |
 
 ```yaml
 pipeline:
   maxReworkIterations: 3
   agentTimeout: 300000
   port: 3000
+  outputHandlers:
+    - file      # writes to logs/agents/{issueKey}-{agent}.log (tail -f)
+    - memory    # serves via GET /api/status/{issueKey}/logs
 ```
+
+Output handlers control where you can see real-time agent output:
+- **file** — each agent writes to a separate log file, watchable with `tail -f`
+- **memory** — keeps output in memory, queryable via the API
+- Both are enabled by default. Disable one by removing it from the list.
 
 ---
 

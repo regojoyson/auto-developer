@@ -64,15 +64,22 @@ cd auto-developer
 
 `./setup.sh` walks you through a step-by-step terminal wizard:
 
-1. Where your code is (local dir / parent dir / clone from URL)
-2. Issue tracker (Jira / GitHub Issues) + trigger status
-3. Git provider (GitLab / GitHub) + **tokens** (masked input, saved to .env)
-4. AI coding CLI (Claude Code / Codex / Gemini) + optional model
-5. Notifications (optional Slack)
-6. Pipeline settings (port, rework limit, timeout)
-7. Summary → confirm → writes `config.yaml` + `.env` + symlinks agents
+1. **Pre-flight check** — detects installed tools, shows what's missing
+2. **Repository** — local dir / parent dir / clone from URL + base branch
+3. **Issue tracker** — Jira / GitHub Issues + trigger & done status
+4. **Git provider** — GitLab / GitHub + API token (masked input, saved to .env)
+5. **AI coding CLI** — Claude Code / Codex / Gemini + optional model
+6. **Notifications** — optional Slack channel
+7. **Pipeline settings** — port, rework limit, timeout, output handlers
+8. **Summary** → confirm → writes `config.yaml` + `.env` + symlinks agents
 
 No manual file editing needed — the wizard handles everything including tokens.
+Project IDs and owner/repo are auto-detected from git remote URLs.
+
+**Re-running `./setup.sh`** on an existing config gives three options:
+- **Re-link only** — keep config, just re-symlink agent files
+- **Reconfigure** — edit current settings with values pre-filled (press Enter to keep)
+- **Start fresh** — blank config from scratch
 
 ```bash
 ./stop.sh      # stops everything, cleans up
@@ -85,9 +92,16 @@ curl -X POST http://localhost:3000/api/trigger \
   -d '{"issueKey": "PROJ-42", "summary": "Add login page"}'
 ```
 
-Check pipeline status:
+Check status, view agent logs, cancel:
 ```bash
-curl http://localhost:3000/api/status/PROJ-42
+curl http://localhost:3000/api/status/PROJ-42          # pipeline state
+curl http://localhost:3000/api/status/PROJ-42/logs      # real-time agent output
+curl -X DELETE http://localhost:3000/api/status/PROJ-42  # cancel & re-trigger
+```
+
+Watch agent output in real-time:
+```bash
+tail -f logs/agents/PROJ-42-orchestrator.log
 ```
 
 ---

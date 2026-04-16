@@ -16,6 +16,8 @@ Base URL: `http://localhost:<port>` (port configured in config.yaml, default 300
 | POST | `/api/trigger` | Manually start pipeline for a ticket |
 | GET | `/api/status` | List all pipelines |
 | GET | `/api/status/:issueKey` | Get pipeline status for a ticket |
+| GET | `/api/status/:issueKey/logs` | Real-time agent output |
+| DELETE | `/api/status/:issueKey` | Cancel and remove a pipeline |
 | POST | `/webhooks/issue-tracker` | Receive issue tracker webhooks |
 | POST | `/webhooks/git` | Receive git provider webhooks |
 
@@ -164,6 +166,69 @@ Get the pipeline status for a specific ticket.
 **Example:**
 ```bash
 curl http://localhost:3000/api/status/PROJ-42
+```
+
+---
+
+## GET /api/status/:issueKey/logs
+
+Get real-time agent output for a pipeline. Shows what agents are doing as they work.
+
+**Query parameters:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `agent` | string | Optional — filter to a specific agent (e.g. `orchestrator`, `brainstorm`) |
+
+**Response (200):**
+```json
+{
+  "issueKey": "PROJ-42",
+  "agent": "all",
+  "output": "--- Agent orchestrator started ---\nReading ticket...\nCreating branch...",
+  "lines": 15
+}
+```
+
+**Examples:**
+```bash
+# All agents
+curl http://localhost:3000/api/status/PROJ-42/logs
+
+# Specific agent
+curl http://localhost:3000/api/status/PROJ-42/logs?agent=orchestrator
+```
+
+Also available as log files: `tail -f logs/agents/PROJ-42-orchestrator.log`
+
+---
+
+## DELETE /api/status/:issueKey
+
+Cancel and remove a pipeline. Deletes the state file so the ticket can be re-triggered.
+
+**Response (200):**
+```json
+{
+  "cancelled": true,
+  "issueKey": "PROJ-42"
+}
+```
+
+| Status | Meaning |
+|--------|---------|
+| 200 | Pipeline cancelled |
+| 404 | No pipeline for this issue key |
+
+**Example:**
+```bash
+# Cancel
+curl -X DELETE http://localhost:3000/api/status/PROJ-42
+
+# Re-trigger
+curl -X POST http://localhost:3000/api/trigger/ \
+  -H 'Content-Type: application/json' \
+  -d '{"issueKey": "PROJ-42"}'
 ```
 
 ---
