@@ -154,25 +154,25 @@ def ask_repo(total_steps: int, prev: dict | None = None) -> dict:
         path = questionary.path("Repo path:", only_directories=True,
                                 default=p.get("path", ""), style=STYLE).ask()
         if path:
-            p = Path(path).expanduser().resolve()
-            if p.exists():
-                success(f"Directory found: {p}")
-                if (p / ".git").exists():
+            resolved = Path(path).expanduser().resolve()
+            if resolved.exists():
+                success(f"Directory found: {resolved}")
+                if (resolved / ".git").exists():
                     success("Git repo detected")
                 else:
                     warn("Not a git repo — agents may not work correctly")
             else:
-                warn(f"Directory does not exist yet: {p}")
+                warn(f"Directory does not exist yet: {resolved}")
                 info("Create it or clone a repo there before running the pipeline")
-            repo["path"] = str(p)
+            repo["path"] = str(resolved)
 
     elif mode == "parentDir":
         path = questionary.path("Parent directory:", only_directories=True,
                                 default=p.get("path", ""), style=STYLE).ask()
         if path:
-            p = Path(path).expanduser().resolve()
-            if p.exists():
-                subdirs = [d.name for d in sorted(p.iterdir()) if d.is_dir() and not d.name.startswith(".")]
+            resolved = Path(path).expanduser().resolve()
+            if resolved.exists():
+                subdirs = [d.name for d in sorted(resolved.iterdir()) if d.is_dir() and not d.name.startswith(".")]
                 if subdirs:
                     success(f"Found {len(subdirs)} repos: {', '.join(subdirs[:8])}")
                     if len(subdirs) > 8:
@@ -180,8 +180,8 @@ def ask_repo(total_steps: int, prev: dict | None = None) -> dict:
                 else:
                     warn("No subdirectories found — is this the right path?")
             else:
-                warn(f"Directory does not exist: {p}")
-            repo["path"] = str(p)
+                warn(f"Directory does not exist: {resolved}")
+            repo["path"] = str(resolved)
 
     elif mode == "clone":
         info("Enter one or more git URLs (comma-separated)")
