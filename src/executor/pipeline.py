@@ -69,22 +69,22 @@ def _extract_blocked_reason(result):
     return "Unknown reason"
 
 
-def _try_transition_jira(issue_key, status_name):
+def _try_transition_issue(issue_key, status_name):
     """Transition Jira status (best-effort)."""
     try:
         adapter, _ = get_issue_tracker()
         adapter.transition_issue(issue_key, status_name)
     except Exception as e:
-        logger.warning(f"Failed to transition Jira {issue_key} to '{status_name}': {e}")
+        logger.warning(f"Failed to transition {issue_key} to '{status_name}': {e}")
 
 
-def _try_add_jira_comment(issue_key, body):
+def _try_add_comment(issue_key, body):
     """Post a Jira comment (best-effort)."""
     try:
         adapter, _ = get_issue_tracker()
         adapter.add_comment(issue_key, body)
     except Exception as e:
-        logger.warning(f"Failed to post Jira comment on {issue_key}: {e}")
+        logger.warning(f"Failed to post comment on {issue_key}: {e}")
 
 
 def _try_notify_slack(message):
@@ -120,7 +120,7 @@ def _handle_agent_failure(issue_key, branch, agent_name, result, statuses):
         "message": error_msg,
     })
 
-    _try_add_jira_comment(issue_key,
+    _try_add_comment(issue_key,
         f"Pipeline failed during {agent_name}.\n\nError: {error_msg}\n\nCheck logs for details.")
     _try_notify_slack(f"{issue_key} pipeline failed during {agent_name} — check logs")
 
@@ -130,9 +130,9 @@ def _handle_blocked(issue_key, branch, statuses, result):
     reason = _extract_blocked_reason(result)
     logger.info(f"Pipeline blocked for {issue_key}: {reason}")
 
-    _try_add_jira_comment(issue_key,
+    _try_add_comment(issue_key,
         f"Pipeline blocked — additional information needed:\n\n{reason}")
-    _try_transition_jira(issue_key, statuses["blocked"])
+    _try_transition_issue(issue_key, statuses["blocked"])
     _try_notify_slack(f"{issue_key} blocked — {reason}")
 
 
@@ -194,7 +194,7 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
     logger.info(f"--- Pipeline started for {issue_key} (branch: {branch}) ---")
 
     # Step 1: Transition Jira to Development status
-    _try_transition_jira(issue_key, statuses["development"])
+    _try_transition_issue(issue_key, statuses["development"])
 
     # Step 2: Analyze phase
     analyze_input = json.dumps({
@@ -241,8 +241,8 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
 
     # Step 5: Transition to awaiting-review, update Jira to Done
     transition_state(branch, "awaiting-review")
-    _try_transition_jira(issue_key, statuses["done"])
-    _try_add_jira_comment(issue_key, f"Implementation completed for {issue_key}. Awaiting review.")
+    _try_transition_issue(issue_key, statuses["done"])
+    _try_add_comment(issue_key, f"Implementation completed for {issue_key}. Awaiting review.")
     _try_notify_slack(f"MR created for {issue_key}")
 
     logger.info(f"--- Pipeline completed for {issue_key} ---")
@@ -263,7 +263,7 @@ def run_rework_phases(issue_key, branch, pr_id, statuses, repo_dir):
     logger.info(f"--- Rework started for {issue_key} ---")
 
     # Transition Jira to Development
-    _try_transition_jira(issue_key, statuses["development"])
+    _try_transition_issue(issue_key, statuses["development"])
     transition_state(branch, "reworking")
 
     # Step 1: Parse feedback
@@ -309,8 +309,8 @@ def run_rework_phases(issue_key, branch, pr_id, statuses, repo_dir):
 
     # Step 3: Back to awaiting-review
     transition_state(branch, "awaiting-review")
-    _try_transition_jira(issue_key, statuses["done"])
-    _try_add_jira_comment(issue_key, f"Rework completed for {issue_key}. Awaiting re-review.")
+    _try_transition_issue(issue_key, statuses["done"])
+    _try_add_comment(issue_key, f"Rework completed for {issue_key}. Awaiting re-review.")
     _try_notify_slack(f"Rework completed for {issue_key}")
 
     logger.info(f"--- Rework completed for {issue_key} ---")

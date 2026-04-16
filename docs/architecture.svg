@@ -84,13 +84,13 @@
   <text x="618" y="147" font-size="10" fill="#1e40af" font-style="italic">state: planning</text>
   <text x="618" y="212" font-size="10" fill="#15803d" font-style="italic">state: developing</text>
 
-  <!-- Jira comment indicators -->
+  <!-- Issue comment indicators -->
   <rect x="735" y="70" width="90" height="28" rx="4" fill="#2563eb" opacity="0.15"/>
-  <text x="780" y="89" text-anchor="middle" font-size="9" fill="#2563eb">Jira comment</text>
+  <text x="780" y="89" text-anchor="middle" font-size="9" fill="#2563eb">Issue comment</text>
   <rect x="735" y="135" width="90" height="28" rx="4" fill="#2563eb" opacity="0.15"/>
-  <text x="780" y="154" text-anchor="middle" font-size="9" fill="#2563eb">Jira comment</text>
+  <text x="780" y="154" text-anchor="middle" font-size="9" fill="#2563eb">Issue comment</text>
   <rect x="735" y="200" width="90" height="28" rx="4" fill="#2563eb" opacity="0.15"/>
-  <text x="780" y="219" text-anchor="middle" font-size="9" fill="#2563eb">Jira comment</text>
+  <text x="780" y="219" text-anchor="middle" font-size="9" fill="#2563eb">Issue comment</text>
 
   <line x1="605" y1="85" x2="733" y2="85" stroke="#2563eb" stroke-width="1" stroke-dasharray="3,2"/>
   <line x1="605" y1="150" x2="733" y2="150" stroke="#2563eb" stroke-width="1" stroke-dasharray="3,2"/>
