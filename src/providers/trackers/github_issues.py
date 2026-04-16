@@ -1,27 +1,47 @@
 """GitHub Issues issue tracker adapter.
 
 Handles incoming GitHub webhook events by detecting when a specific label is
-applied to an issue. When the label matches the configured trigger status
-(e.g. "ready-for-dev"), the adapter extracts the issue number, title, and
-repository name to kick off the automated pipeline.
+applied to an issue. Also provides methods for managing issue labels and
+adding comments via the GitHub API, used by the pipeline runner.
 
 The module exposes a singleton ``adapter`` instance at module level for
 use by the issue tracker factory.
 """
 
+import logging
+import os
+
+import requests
+
 from src.providers.base import IssueTrackerBase
+
+logger = logging.getLogger(__name__)
 
 
 class GitHubIssuesAdapter(IssueTrackerBase):
-    """Adapter that parses GitHub Issues webhook payloads for label events.
+    """Adapter that parses GitHub Issues webhook payloads and calls GitHub API.
 
-    Listens for the ``issues`` event type with an ``action`` of ``labeled``,
-    and checks whether the applied label matches the configured trigger
-    status. Ignores all other GitHub event types and actions.
+    Webhook parsing listens for ``issues`` events with ``labeled`` action.
+    API methods use GITHUB_TOKEN from environment variables.
     """
 
     name = "github-issues"
     event_label = "issue"
+
+    def _api_headers(self):
+        """Build authorization headers for GitHub API calls."""
+        token = os.environ.get("GITHUB_TOKEN", "")
+        return {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+    def _parse_issue_key(self, issue_key):
+        """Parse 'repo#123' into (full_repo, number)."""
+        repo, number = issue_key.split("#")
+        owner = os.environ.get("GITHUB_OWNER", "")
+        return f"{owner}/{repo}", int(number)
 
     def parse_webhook(self, headers, payload, config):
         """Parse a GitHub Issues webhook payload for a matching label event.
@@ -57,6 +77,43 @@ class GitHubIssuesAdapter(IssueTrackerBase):
             "summary": issue.get("title", ""),
             "component": None,
         }
+
+    def transition_issue(self, issue_key, status_name):
+        """Transition a GitHub issue by adding a label.
+
+        For GitHub Issues, "status" is represented by labels. This method
+        adds the target label.
+
+        Args:
+            issue_key: Issue key in "repo#123" format.
+            status_name: Label name to add (e.g. "in-progress", "done").
+        """
+        repo_full, number = self._parse_issue_key(issue_key)
+        headers = self._api_headers()
+        resp = requests.post(
+            f"https://api.github.com/repos/{repo_full}/issues/{number}/labels",
+            headers=headers,
+            json={"labels": [status_name]},
+        )
+        resp.raise_for_status()
+        logger.info(f"Added label '{status_name}' to {issue_key}")
+
+    def add_comment(self, issue_key, body):
+        """Add a comment to a GitHub issue.
+
+        Args:
+            issue_key: Issue key in "repo#123" format.
+            body: Comment text (Markdown supported).
+        """
+        repo_full, number = self._parse_issue_key(issue_key)
+        headers = self._api_headers()
+        resp = requests.post(
+            f"https://api.github.com/repos/{repo_full}/issues/{number}/comments",
+            headers=headers,
+            json={"body": body},
+        )
+        resp.raise_for_status()
+        logger.info(f"Posted comment on {issue_key}")
 
 
 adapter = GitHubIssuesAdapter()
