@@ -30,10 +30,29 @@ echo -e "${CYAN}  Auto-Pilot Setup${NC}"
 echo -e "${CYAN}═══════════════════════════════════════════════${NC}"
 echo ""
 
-# ── Generate config.yaml if it doesn't exist ──────────
+# ── Check if config.yaml exists ───────────────────────
+
+RUN_WIZARD=false
 
 if [ ! -f "config.yaml" ]; then
-  echo -e "  No config.yaml found. Let's create one.\n"
+  RUN_WIZARD=true
+else
+  echo -e "  config.yaml already exists.\n"
+  ask "Do you want to reconfigure? (y/n) [n]: "
+  read -r RECONFIG
+  echo ""
+  if [ "$RECONFIG" = "y" ] || [ "$RECONFIG" = "Y" ]; then
+    RUN_WIZARD=true
+    mv config.yaml config.yaml.bak
+    ok "Old config backed up to config.yaml.bak"
+    echo ""
+  fi
+fi
+
+# ── Interactive wizard ────────────────────────────────
+
+if [ "$RUN_WIZARD" = true ]; then
+  echo -e "  Let's configure Auto Developer.\n"
 
   # --- Repo mode ---
   echo -e "  ${CYAN}Where is your code?${NC}"
