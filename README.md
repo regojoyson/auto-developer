@@ -16,13 +16,15 @@ No manual handoffs. No copy-pasting tickets into prompts. Just move a ticket to 
 
 **The pipeline in 30 seconds:**
 - A ticket arrives (via webhook or manual API call)
-- **Orchestrator** checks out the latest base branch, creates a feature branch
-- **Brainstorm agent** explores the codebase, writes `PLAN.md` with the best approach
-- **Developer agent** implements from the plan, commits code
-- A **PR/MR is created** automatically with description and file change summary
+- **Python server drives phases one at a time** — each phase invokes a focused agent and tracks state
+- **Phase 1 — Analyze:** Orchestrator reads the full Jira ticket, writes `TICKET.md`, posts analysis as Jira comment
+- **Phase 2 — Plan:** Brainstorm agent explores the codebase, writes `PLAN.md`, posts plan summary as Jira comment
+- **Phase 3 — Implement:** Developer agent implements from the plan, commits code, creates PR/MR
+- Jira ticket transitions through statuses: Ready for Dev → Development → Done
 - **Human reviews** — approve to merge, or comment to trigger a rework cycle
 - **Feedback parser** structures the review comments, developer agent applies fixes
 - Loop until approved or rework limit hit (then escalate)
+- Every phase is tracked with timing, error details, and artifacts in `.pipeline-state/`
 
 ---
 
@@ -162,9 +164,11 @@ auto-developer/
 │   │   ├── git/                 # GitLab, GitHub
 │   │   ├── cli/                 # Claude Code, Codex, Gemini
 │   │   └── notifications/       # Slack
-│   ├── state/manager.py         # Pipeline state machine
+│   ├── state/manager.py         # Pipeline state machine (phase tracking, artifacts, errors)
 │   ├── repos/resolver.py        # Repo resolver (3 modes)
-│   └── executor/runner.py       # Spawns AI coding CLI processes
+│   └── executor/
+│       ├── runner.py            # Spawns AI coding CLI processes
+│       └── pipeline.py          # Phase runner (drives analyze → plan → implement → review)
 ├── dashboard-react/             # Optional React dashboard (port 3001)
 ├── mcp_servers/                 # GitLab + GitHub MCP servers (Python)
 ├── docs/                        # All documentation + diagrams

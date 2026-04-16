@@ -41,14 +41,18 @@ Automate the full development lifecycle from Jira ticket creation to GitLab merg
 
 ## 3. Pipeline Overview
 
-The pipeline runs in four phases:
+The pipeline runs in discrete phases, driven by the Python server (not the agent). Each phase invokes one focused agent and transitions state:
 
-| Phase | Name | What Happens | Output |
-|-------|------|-------------|--------|
-| 1 | Trigger | Jira webhook fires on status -> Ready for Dev. Orchestrator fetches ticket context. | Branch created, ticket context loaded |
-| 2 | Agents | Brainstorm agent explores approaches and writes PLAN.md. Developer agent implements from the plan. | Committed code on feature branch |
-| 3 | Review | MR created on GitLab. Reviewer is notified. Human reads diff and decides. | Approve / Manual edit / Feedback |
-| 4 | Rework | Feedback parser reads MR comments, builds task list. Developer agent applies changes, pushes commit, updates MR. | Updated MR, reviewer re-notified |
+| Phase | Name | Pipeline State | What Happens | Output |
+|-------|------|---------------|-------------|--------|
+| 1 | Trigger | `analyzing` | Webhook fires, Jira transitions to Development status | Pipeline state created |
+| 2 | Analyze | `analyzing` | Orchestrator reads ticket (all fields), evaluates detail, writes TICKET.md, posts Jira comment | Branch created, TICKET.md committed |
+| 3 | Plan | `planning` | Brainstorm agent explores codebase, writes PLAN.md, posts plan summary as Jira comment | PLAN.md committed |
+| 4 | Implement | `developing` | Developer agent codes from PLAN.md, creates PR/MR | Code committed, PR created |
+| 5 | Review | `awaiting-review` | Human reviews diff — approve, edit, or comment | Jira transitioned to Done |
+| 6 | Rework | `reworking` | Feedback parser + developer rework cycle (max 3 rounds) | Updated PR |
+
+Any phase can transition to `failed` on unrecoverable errors, with error details stored in the state file.
 
 ---
 
@@ -192,7 +196,7 @@ A Node.js Express service handles incoming webhooks from both Jira and GitLab.
 
 ### Pipeline State
 
-Track pipeline state (`brainstorming` / `developing` / `awaiting-review` / `reworking` / `merged`) as a JSON file per branch in `.pipeline-state/`. This prevents duplicate agent invocations when multiple events arrive.
+Track pipeline state (`analyzing` / `planning` / `developing` / `awaiting-review` / `reworking` / `merged` / `failed`) as a JSON file per branch in `.pipeline-state/`. Each state file includes phase history with timing, artifact tracking (MR URLs), and error details. This prevents duplicate agent invocations and provides full visibility into pipeline progress.
 
 ---
 
