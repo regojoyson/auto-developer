@@ -4,12 +4,11 @@ Provides a ``POST /webhooks/issue-tracker`` endpoint that receives webhook
 payloads from the configured issue tracker (Jira or GitHub Issues). When a
 matching event is detected (e.g. a ticket status change to "Ready for
 Development"), the handler creates a feature branch name, initializes
-pipeline state, and launches the orchestrator agent in a background thread.
+pipeline state, and launches the pipeline phases in a background thread.
 
 Mount this router under ``/webhooks/issue-tracker`` in the FastAPI app.
 """
 
-import json
 import logging
 import re
 import threading
@@ -18,7 +17,7 @@ from fastapi import APIRouter, Request
 
 from src.config import config as app_config
 from src.state.manager import get_state, create_state
-from src.executor.runner import run_agent
+from src.executor.pipeline import run_pipeline_phases
 from src.repos.resolver import get_repo_dir, prepare_repo, get_base_branch
 from src.providers.issue_tracker import get_issue_tracker
 
@@ -31,8 +30,8 @@ async def handle_webhook(request: Request):
     """Handle an incoming issue tracker webhook.
 
     Delegates payload parsing to the configured adapter. If the event matches
-    the trigger criteria, creates pipeline state and spawns the orchestrator
-    agent in a background thread.
+    the trigger criteria, creates pipeline state and launches the pipeline
+    phases in a background thread.
 
     Args:
         request: The incoming FastAPI request containing webhook headers
@@ -55,9 +54,9 @@ async def handle_webhook(request: Request):
     summary = parsed["summary"]
     component = parsed.get("component")
 
-    slug = re.sub(r"[^a-z0-9\s-]", "", summary.lower())
-    slug = re.sub(r"\s+", "-", slug)[:40].rstrip("-")
-    branch = f"feature/{issue_key}-{slug}"
+    slug = re.sub(r"[^a-z0-9\s_]", "", summary.lower())
+    slug = re.sub(r"\s+", "_", slug)[:40].rstrip("_")
+    branch = f"{issue_key.lower()}_{slug}"
 
     if get_state(branch):
         logger.warning(f"Pipeline already active for {branch}")
@@ -71,22 +70,17 @@ async def handle_webhook(request: Request):
 
     base_branch = get_base_branch()
     tracker_cfg = app_config["issue_tracker"]
-    input_data = json.dumps({
-        "issueKey": issue_key,
-        "branch": branch,
-        "summary": summary,
-        "projectKey": issue_key.split("-")[0],
-        "baseBranch": base_branch,
-        "statuses": {
-            "trigger": tracker_cfg["trigger_status"],
-            "done": tracker_cfg["done_status"],
-            "blocked": tracker_cfg["blocked_status"],
-        },
-    })
+    statuses = {
+        "trigger": tracker_cfg["trigger_status"],
+        "development": tracker_cfg["development_status"],
+        "done": tracker_cfg["done_status"],
+        "blocked": tracker_cfg["blocked_status"],
+    }
 
     threading.Thread(
-        target=run_agent, args=("orchestrator", input_data),
-        kwargs={"cwd": repo_dir, "issue_key": issue_key}, daemon=True
+        target=run_pipeline_phases,
+        args=(issue_key, branch, summary, issue_key.split("-")[0], base_branch, statuses, repo_dir),
+        daemon=True,
     ).start()
 
     return {"accepted": True, "issueKey": issue_key, "branch": branch, "repoDir": repo_dir}
