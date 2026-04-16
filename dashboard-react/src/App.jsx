@@ -1,0 +1,29 @@
+import { HashRouter, Routes, Route } from 'react-router-dom';
+import Sidebar from './components/Sidebar';
+import PipelineList from './components/PipelineList';
+import PipelineDetail from './components/PipelineDetail';
+import Logs from './components/Logs';
+import TriggerForm from './components/TriggerForm';
+import { ToastProvider } from './components/ToastContext';
+
+export default function App() {
+  return (
+    <HashRouter>
+      <ToastProvider>
+        <div className="bg-gray-50 text-gray-900 min-h-screen flex">
+          <Sidebar />
+          <main className="ml-56 flex-1 min-h-screen">
+            <div className="p-6 max-w-6xl">
+              <Routes>
+                <Route path="/" element={<PipelineList />} />
+                <Route path="/trigger" element={<TriggerForm />} />
+                <Route path="/pipeline/:issueKey" element={<PipelineDetail />} />
+                <Route path="/logs/:issueKey" element={<Logs />} />
+              </Routes>
+            </div>
+          </main>
+        </div>
+      </ToastProvider>
+    </HashRouter>
+  );
+}
