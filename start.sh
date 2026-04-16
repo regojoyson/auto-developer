@@ -115,20 +115,23 @@ elif [ "$REPO_MODE" = "clone" ]; then
   ok "Clone mode: $URL_COUNT URL(s) (will clone on first ticket)"
 fi
 
-# ── 7. Generate .claude/settings.json ─────────────────
+# ── 7. Generate CLI settings ──────────────────────────
 
-info "Generating MCP config..."
+info "Generating MCP config for $CLI_ADAPTER..."
+
+CLI_CONFIG_DIR=$(node src/providers/cli-dirs.js configDir 2>/dev/null || echo ".claude")
+mkdir -p "$CLI_CONFIG_DIR"
 
 if [ "$GIT_PROVIDER" = "gitlab" ]; then
-  cat > .claude/settings.json << 'EOF'
+  cat > "$CLI_CONFIG_DIR/settings.json" << 'EOF'
 {"mcpServers":{"git-provider":{"command":"node","args":["mcp-servers/gitlab/index.js"],"env":{"GITLAB_BASE_URL":"${GITLAB_BASE_URL}","GITLAB_TOKEN":"${GITLAB_TOKEN}","GITLAB_PROJECT_ID":"${GITLAB_PROJECT_ID}"}}}}
 EOF
 elif [ "$GIT_PROVIDER" = "github" ]; then
-  cat > .claude/settings.json << 'EOF'
+  cat > "$CLI_CONFIG_DIR/settings.json" << 'EOF'
 {"mcpServers":{"git-provider":{"command":"node","args":["mcp-servers/github/index.js"],"env":{"GITHUB_TOKEN":"${GITHUB_TOKEN}","GITHUB_OWNER":"${GITHUB_OWNER}","GITHUB_REPO":"${GITHUB_REPO}"}}}}
 EOF
 fi
-ok "MCP config: $GIT_PROVIDER"
+ok "MCP config: $GIT_PROVIDER → $CLI_CONFIG_DIR/settings.json"
 
 # ── 8. Start server ──────────────────────────────────
 

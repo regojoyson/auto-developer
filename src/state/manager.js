@@ -69,7 +69,7 @@ function getState(branch) {
 /**
  * Create an initial pipeline state for a new ticket/branch.
  * @param {string} branch - Git branch name
- * @param {string} issueKey - Jira issue key (e.g. `PROJ-123`)
+ * @param {string} issueKey - Issue key (e.g. `PROJ-123`)
  * @param {object} [repoInfo] - Optional repo context
  * @param {string} [repoInfo.repoPath] - Absolute path to the target repo directory
  * @returns {PipelineState} The newly created state (starts at `brainstorming`)

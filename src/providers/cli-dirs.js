@@ -17,7 +17,9 @@ if (field === 'agentDir') {
   console.log(adapter.agentDir);
 } else if (field === 'configDir') {
   console.log(adapter.configDir);
+} else if (field === 'rulesFileName') {
+  console.log(adapter.rulesFileName);
 } else {
-  console.error('Usage: node cli-dirs.js agentDir|configDir');
+  console.error('Usage: node cli-dirs.js agentDir|configDir|rulesFileName');
   process.exit(1);
 }

@@ -14,6 +14,7 @@ class GeminiAdapter extends CliAdapterBase {
   get defaultCommand() { return 'gemini'; }
   get agentDir() { return '.gemini/agents'; }
   get configDir() { return '.gemini'; }
+  get rulesFileName() { return 'GEMINI.md'; }
 
   buildArgs(agentName, input, config) {
     const prompt = `[Agent: ${agentName}]\n${input}`;

@@ -186,12 +186,13 @@ fi
 # Get CLI-specific directories (e.g. .claude/agents, .claude)
 CLI_AGENT_DIR=$(node src/providers/cli-dirs.js agentDir 2>/dev/null || echo ".claude/agents")
 CLI_CONFIG_DIR=$(node src/providers/cli-dirs.js configDir 2>/dev/null || echo ".claude")
+CLI_RULES_FILE=$(node src/providers/cli-dirs.js rulesFileName 2>/dev/null || echo "CLAUDE.md")
 
 echo -e "  CLI agent dir: ${CYAN}${CLI_AGENT_DIR}${NC}"
 echo -e "  Linking agent files into repos..."
 echo ""
 
-AGENTS_SRC="$DIR/.claude/agents"
+AGENTS_SRC="$DIR/agents"
 
 for REPO in "${REPO_DIRS[@]}"; do
   REPO_NAME=$(basename "$REPO")
@@ -201,22 +202,23 @@ for REPO in "${REPO_DIRS[@]}"; do
     continue
   fi
 
-  # 1. Symlink .auto-developer/ as a reference to our project's .claude/
+  # 1. Symlink .auto-developer/ as a reference to our project's agents/
   AD_LINK="$REPO/.auto-developer"
   if [ -L "$AD_LINK" ]; then
     ok "$REPO_NAME — .auto-developer/ already linked"
   elif [ ! -d "$AD_LINK" ]; then
-    ln -s "$DIR/.claude" "$AD_LINK"
+    ln -s "$DIR/agents" "$AD_LINK"
     ok "$REPO_NAME — linked .auto-developer/"
   fi
 
   # 2. Create CLI agent directory if it doesn't exist
   mkdir -p "$REPO/$CLI_AGENT_DIR"
 
-  # 3. Symlink each agent .md file individually
+  # 3. Symlink each agent .md file (skip CLAUDE.md — handled separately)
   for AGENT_FILE in "$AGENTS_SRC"/*.md; do
     [ ! -f "$AGENT_FILE" ] && continue
     AGENT_NAME=$(basename "$AGENT_FILE")
+    [ "$AGENT_NAME" = "CLAUDE.md" ] && continue
     TARGET="$REPO/$CLI_AGENT_DIR/$AGENT_NAME"
 
     if [ -L "$TARGET" ]; then
@@ -229,16 +231,16 @@ for REPO in "${REPO_DIRS[@]}"; do
     fi
   done
 
-  # 4. Symlink CLAUDE.md (global rules) into CLI config dir
+  # 4. Symlink RULES.md → CLI-specific filename (e.g. CLAUDE.md, AGENTS.md, GEMINI.md)
   mkdir -p "$REPO/$CLI_CONFIG_DIR"
-  RULES_TARGET="$REPO/$CLI_CONFIG_DIR/CLAUDE.md"
+  RULES_TARGET="$REPO/$CLI_CONFIG_DIR/$CLI_RULES_FILE"
   if [ -L "$RULES_TARGET" ]; then
-    ok "$REPO_NAME — CLAUDE.md already linked"
+    ok "$REPO_NAME — $CLI_RULES_FILE already linked"
   elif [ -f "$RULES_TARGET" ]; then
-    warn "$REPO_NAME — CLAUDE.md already exists (skipped)"
+    warn "$REPO_NAME — $CLI_RULES_FILE already exists (skipped)"
   else
-    ln -s "$DIR/.claude/CLAUDE.md" "$RULES_TARGET"
-    ok "$REPO_NAME — linked CLAUDE.md"
+    ln -s "$DIR/agents/RULES.md" "$RULES_TARGET"
+    ok "$REPO_NAME — linked RULES.md as $CLI_RULES_FILE"
   fi
 done
 

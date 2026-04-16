@@ -49,11 +49,12 @@ cd "$DIR"
 source scripts/resolve-repos.sh 2>/dev/null
 
 CLEANED=0
-AGENTS_SRC="$DIR/.claude/agents"
+AGENTS_SRC="$DIR/agents"
 
 # Get CLI-specific dirs
 CLI_AGENT_DIR=$(node src/providers/cli-dirs.js agentDir 2>/dev/null || echo ".claude/agents")
 CLI_CONFIG_DIR=$(node src/providers/cli-dirs.js configDir 2>/dev/null || echo ".claude")
+CLI_RULES_FILE=$(node src/providers/cli-dirs.js rulesFileName 2>/dev/null || echo "CLAUDE.md")
 
 if [ ${#REPO_DIRS[@]} -gt 0 ]; then
   echo ""
@@ -88,13 +89,13 @@ if [ ${#REPO_DIRS[@]} -gt 0 ]; then
       fi
     done
 
-    # Remove CLAUDE.md symlink (only if it points to us)
-    RULES_TARGET="$REPO/$CLI_CONFIG_DIR/CLAUDE.md"
+    # Remove rules file symlink (only if it points to our RULES.md)
+    RULES_TARGET="$REPO/$CLI_CONFIG_DIR/$CLI_RULES_FILE"
     if [ -L "$RULES_TARGET" ]; then
       LINK_TARGET=$(readlink "$RULES_TARGET")
-      if [ "$LINK_TARGET" = "$DIR/.claude/CLAUDE.md" ]; then
+      if [ "$LINK_TARGET" = "$DIR/agents/RULES.md" ]; then
         rm "$RULES_TARGET"
-        ok "$REPO_NAME — CLAUDE.md removed"
+        ok "$REPO_NAME — $CLI_RULES_FILE removed"
         CLEANED=1
       fi
     fi

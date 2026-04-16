@@ -55,12 +55,21 @@ class CliAdapterBase {
   get agentDir() { return ''; }
 
   /**
-   * Relative path to this CLI's config directory (for CLAUDE.md / global rules).
+   * Relative path to this CLI's config directory (for global rules file).
    * @type {string}
    * @abstract
    * @example '.claude' for Claude Code, '.codex' for Codex
    */
   get configDir() { return ''; }
+
+  /**
+   * Filename for the global rules file in the CLI's config directory.
+   * Our source file is `agents/RULES.md` — it gets symlinked with this name.
+   * @type {string}
+   * @abstract
+   * @example 'CLAUDE.md' for Claude Code, 'AGENTS.md' for Codex, 'GEMINI.md' for Gemini
+   */
+  get rulesFileName() { return ''; }
 
   /**
    * Build CLI arguments for invoking the agent.

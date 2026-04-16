@@ -14,6 +14,7 @@ class CodexAdapter extends CliAdapterBase {
   get defaultCommand() { return 'codex'; }
   get agentDir() { return '.codex/agents'; }
   get configDir() { return '.codex'; }
+  get rulesFileName() { return 'AGENTS.md'; }
 
   buildArgs(agentName, input, config) {
     // Codex doesn't have an --agent flag, so we prepend the agent role to the prompt

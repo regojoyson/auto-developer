@@ -1,7 +1,7 @@
 /**
  * @module webhook/server
- * @description Express HTTP server that receives webhooks from Jira and GitLab
- * and routes them to the appropriate pipeline handlers.
+ * @description Express HTTP server that receives webhooks from issue trackers
+ * and git providers, and routes them to the appropriate pipeline handlers.
  *
  * Endpoints:
  *   GET  /health                  — Health-check (returns `{ status: 'ok' }`)
@@ -29,7 +29,7 @@ const config = require('../config');
 const app = express();
 const PORT = config.pipeline.port;
 
-// Parse JSON payloads up to 1 MB (GitLab webhooks can be large)
+// Parse JSON payloads up to 1 MB (webhook payloads can be large)
 app.use(express.json({ limit: '1mb' }));
 
 // Health check — useful for monitoring and ngrok tunnel verification

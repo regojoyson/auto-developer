@@ -14,6 +14,7 @@ class ClaudeCodeAdapter extends CliAdapterBase {
   get defaultCommand() { return 'claude'; }
   get agentDir() { return '.claude/agents'; }
   get configDir() { return '.claude'; }
+  get rulesFileName() { return 'CLAUDE.md'; }
 
   buildArgs(agentName, input, config) {
     const args = ['--agent', agentName, '--print', '--input', input];
