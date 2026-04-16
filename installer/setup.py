@@ -129,8 +129,9 @@ def check_prerequisites():
     console.print()
 
 
-def ask_repo(total_steps: int) -> dict:
+def ask_repo(total_steps: int, prev: dict | None = None) -> dict:
     """Step 1: Where is the code?"""
+    p = (prev or {}).get("repo", {})
     step(1, total_steps, "Repository",
          "Where is the code the AI agents will work on?")
 
@@ -143,13 +144,15 @@ def ask_repo(total_steps: int) -> dict:
     mode = questionary.select(
         "Where is your code?",
         choices=REPO_MODES,
+        default=p.get("mode", "dir"),
         style=STYLE,
     ).ask()
 
     repo = {"mode": mode}
 
     if mode == "dir":
-        path = questionary.path("Repo path:", only_directories=True, style=STYLE).ask()
+        path = questionary.path("Repo path:", only_directories=True,
+                                default=p.get("path", ""), style=STYLE).ask()
         if path:
             p = Path(path).expanduser().resolve()
             if p.exists():
@@ -164,7 +167,8 @@ def ask_repo(total_steps: int) -> dict:
             repo["path"] = str(p)
 
     elif mode == "parentDir":
-        path = questionary.path("Parent directory:", only_directories=True, style=STYLE).ask()
+        path = questionary.path("Parent directory:", only_directories=True,
+                                default=p.get("path", ""), style=STYLE).ask()
         if path:
             p = Path(path).expanduser().resolve()
             if p.exists():
@@ -199,14 +203,15 @@ def ask_repo(total_steps: int) -> dict:
     console.print()
     info("The base branch is where feature branches are created from.")
     info("Typically 'main', 'master', or 'develop'.")
-    base_branch = questionary.text("Base branch:", default="main", style=STYLE).ask()
+    base_branch = questionary.text("Base branch:", default=p.get("baseBranch", "main"), style=STYLE).ask()
     repo["baseBranch"] = base_branch
 
     return repo
 
 
-def ask_issue_tracker(total_steps: int) -> dict:
+def ask_issue_tracker(total_steps: int, prev: dict | None = None) -> dict:
     """Step 2: Which issue tracker?"""
+    p = (prev or {}).get("issueTracker", {})
     step(2, total_steps, "Issue Tracker",
          "Where do your tickets/issues live? The pipeline watches for status changes.")
 
@@ -218,6 +223,7 @@ def ask_issue_tracker(total_steps: int) -> dict:
     tracker_type = questionary.select(
         "Issue tracker:",
         choices=ISSUE_TRACKERS,
+        default=p.get("type", "jira"),
         style=STYLE,
     ).ask()
 
@@ -231,18 +237,20 @@ def ask_issue_tracker(total_steps: int) -> dict:
 
     config["triggerStatus"] = questionary.text(
         f"{defaults['trigger_label']} (starts the pipeline):",
-        default=defaults["trigger_default"], style=STYLE
+        default=p.get("triggerStatus", defaults["trigger_default"]), style=STYLE
     ).ask()
     config["doneStatus"] = questionary.text(
         f"{defaults['done_label']} (after merge):",
-        default=defaults["done_default"], style=STYLE
+        default=p.get("doneStatus", defaults["done_default"]), style=STYLE
     ).ask()
 
     return config
 
 
-def ask_git_provider(total_steps: int) -> tuple[dict, dict]:
+def ask_git_provider(total_steps: int, prev: dict | None = None, prev_env: dict | None = None) -> tuple[dict, dict]:
     """Step 3: Git provider + API tokens."""
+    p = (prev or {}).get("gitProvider", {})
+    pe = prev_env or {}
     step(3, total_steps, "Git Provider + Tokens",
          "Where is your git remote? We need API tokens to create branches, PRs, and commit code.")
 
@@ -254,6 +262,7 @@ def ask_git_provider(total_steps: int) -> tuple[dict, dict]:
     provider_type = questionary.select(
         "Git provider:",
         choices=GIT_PROVIDERS,
+        default=p.get("type", "gitlab"),
         style=STYLE,
     ).ask()
 
@@ -279,29 +288,37 @@ def ask_git_provider(total_steps: int) -> tuple[dict, dict]:
         console.print()
 
     for var_def in GIT_PROVIDER_ENV[provider_type]:
+        prev_val = pe.get(var_def["key"], var_def["default"])
         if var_def["secret"]:
-            value = questionary.password(f"{var_def['label']}:", style=STYLE).ask()
-            if value:
+            hint = f" (current: {prev_val[:4]}****)" if prev_val else ""
+            value = questionary.password(f"{var_def['label']}{hint}:", style=STYLE).ask()
+            # Keep previous value if user just pressed Enter on password
+            if not value and prev_val:
+                value = prev_val
+                info(f"  Keeping existing {var_def['key']}")
+            elif value:
                 success(f"{var_def['key']} set (masked)")
             else:
                 error(f"{var_def['key']} is empty — the pipeline won't work without it")
         else:
-            value = questionary.text(f"{var_def['label']}:", default=var_def["default"], style=STYLE).ask()
+            value = questionary.text(f"{var_def['label']}:", default=prev_val, style=STYLE).ask()
         env_vars[var_def["key"]] = value
 
     console.print()
     info("Bot usernames are filtered out from PR/MR comments (they're not human feedback)")
+    prev_bots = ", ".join(p.get("botUsers", [])) if p.get("botUsers") else GIT_PROVIDER_BOTS[provider_type]
     bot_users = questionary.text(
         "Bot usernames to ignore (comma-separated):",
-        default=GIT_PROVIDER_BOTS[provider_type], style=STYLE
+        default=prev_bots, style=STYLE
     ).ask()
     config["botUsers"] = [u.strip() for u in bot_users.split(",") if u.strip()]
 
     return config, env_vars
 
 
-def ask_cli_adapter(total_steps: int) -> dict:
+def ask_cli_adapter(total_steps: int, prev: dict | None = None) -> dict:
     """Step 4: Which AI coding CLI?"""
+    p = (prev or {}).get("cliAdapter", {})
     step(4, total_steps, "AI Coding CLI",
          "Which AI coding tool should run the agents? It must be installed on this machine.")
 
@@ -311,6 +328,7 @@ def ask_cli_adapter(total_steps: int) -> dict:
     cli_type = questionary.select(
         "AI coding CLI:",
         choices=CLI_ADAPTERS,
+        default=p.get("type", "claude-code"),
         style=STYLE,
     ).ask()
 
@@ -336,7 +354,7 @@ def ask_cli_adapter(total_steps: int) -> dict:
     info("Press Enter to use the CLI's default model.")
     model = questionary.text(
         "Model name (optional):",
-        default="", style=STYLE
+        default=p.get("model", ""), style=STYLE
     ).ask()
     if model:
         config["model"] = model
@@ -344,15 +362,16 @@ def ask_cli_adapter(total_steps: int) -> dict:
     return config
 
 
-def ask_notification(total_steps: int) -> dict | None:
+def ask_notification(total_steps: int, prev: dict | None = None) -> dict | None:
     """Step 5: Notifications (optional)."""
+    p = (prev or {}).get("notification", {}) or {}
     step(5, total_steps, "Notifications (optional)",
          "Get notified on Slack (or other channels) when PRs are created, merged, or need attention.")
 
     info("Notifications are [bold]optional[/bold]. Skip this if you don't need them.")
     console.print()
 
-    enable = questionary.confirm("Enable notifications?", default=False, style=STYLE).ask()
+    enable = questionary.confirm("Enable notifications?", default=bool(p), style=STYLE).ask()
     if not enable:
         info("Notifications disabled — you can enable them later in config.yaml")
         return None
@@ -368,28 +387,30 @@ def ask_notification(total_steps: int) -> dict | None:
         info("See docs/prerequisites.md for setup instructions.")
         console.print()
 
-    channel = questionary.text("Channel name:", default="dev-team", style=STYLE).ask()
+    channel = questionary.text("Channel name:", default=p.get("channel", "dev-team"), style=STYLE).ask()
 
     return {"type": notif_type, "channel": channel}
 
 
-def ask_pipeline(total_steps: int) -> dict:
+def ask_pipeline(total_steps: int, prev: dict | None = None) -> dict:
     """Step 6: Pipeline runtime settings."""
+    p = (prev or {}).get("pipeline", {})
     step(6, total_steps, "Pipeline Settings",
          "Configure the webhook server port, rework limits, agent timeouts, and output visibility.")
 
     info("The webhook server listens for events from your issue tracker and git provider.")
-    port = questionary.text("Server port:", default=PIPELINE_DEFAULTS["port"], style=STYLE).ask()
+    port = questionary.text("Server port:", default=str(p.get("port", PIPELINE_DEFAULTS["port"])), style=STYLE).ask()
 
     console.print()
     info("If a reviewer keeps requesting changes, the pipeline caps at a max number of rework cycles.")
     info("After this limit, it sends an escalation notification instead of reworking again.")
-    max_rework = questionary.text("Max rework iterations:", default=PIPELINE_DEFAULTS["max_rework"], style=STYLE).ask()
+    max_rework = questionary.text("Max rework iterations:", default=str(p.get("maxReworkIterations", PIPELINE_DEFAULTS["max_rework"])), style=STYLE).ask()
 
     console.print()
     info("How long an agent process can run before being killed (in seconds).")
     info("Complex tickets may need more time. Default is 5 minutes (300s).")
-    timeout = questionary.text("Agent timeout (seconds):", default=PIPELINE_DEFAULTS["timeout_seconds"], style=STYLE).ask()
+    prev_timeout = str(p.get("agentTimeout", 300000) // 1000) if p.get("agentTimeout") else PIPELINE_DEFAULTS["timeout_seconds"]
+    timeout = questionary.text("Agent timeout (seconds):", default=prev_timeout, style=STYLE).ask()
 
     console.print()
     info("Output handlers control where you can see what agents are doing in real-time.")
@@ -494,6 +515,34 @@ def write_env(env_vars: dict):
     success(".env written (contains your tokens — never commit this file)")
 
 
+def load_previous() -> tuple[dict | None, dict]:
+    """Load existing config.yaml and .env as defaults for reconfiguration.
+
+    Returns:
+        Tuple of (prev_config or None, prev_env dict).
+    """
+    prev_config = None
+    prev_env = {}
+
+    if CONFIG_PATH.exists():
+        try:
+            prev_config = yaml.safe_load(CONFIG_PATH.read_text())
+        except Exception:
+            pass
+
+    if ENV_PATH.exists():
+        try:
+            for line in ENV_PATH.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, val = line.split("=", 1)
+                    prev_env[key.strip()] = val.strip()
+        except Exception:
+            pass
+
+    return prev_config, prev_env
+
+
 # ─── Main ─────────────────────────────────────────────
 
 def main():
@@ -503,14 +552,23 @@ def main():
     # Pre-flight checks
     check_prerequisites()
 
-    # Check for existing config
+    # Check for existing config — offer reconfigure with pre-filled defaults
+    prev = None
+    prev_env = {}
+
     if CONFIG_PATH.exists():
         info("config.yaml already exists from a previous setup.\n")
-        reconfig = questionary.confirm(
-            "Do you want to reconfigure from scratch?",
-            default=False, style=STYLE,
+        action = questionary.select(
+            "What would you like to do?",
+            choices=[
+                questionary.Choice("Re-link agent files only (keep current config)", value="relink"),
+                questionary.Choice("Reconfigure (edit current settings)", value="reconfig"),
+                questionary.Choice("Start fresh (blank config)", value="fresh"),
+            ],
+            style=STYLE,
         ).ask()
-        if not reconfig:
+
+        if action == "relink":
             info("Keeping existing config. Re-linking agent files...\n")
             config = yaml.safe_load(CONFIG_PATH.read_text())
             link_agents(config)
@@ -522,19 +580,25 @@ def main():
             ))
             console.print()
             return
-        backup = CONFIG_PATH.with_suffix(".yaml.bak")
-        CONFIG_PATH.rename(backup)
-        info(f"Old config backed up to {backup.name}\n")
+
+        if action == "reconfig":
+            prev, prev_env = load_previous()
+            info("Current values shown as defaults — press Enter to keep, or type to change.\n")
+        else:
+            # fresh start
+            backup = CONFIG_PATH.with_suffix(".yaml.bak")
+            CONFIG_PATH.rename(backup)
+            info(f"Old config backed up to {backup.name}\n")
 
     total_steps = 7
 
-    # Collect all config
-    repo_config = ask_repo(total_steps)
-    tracker_config = ask_issue_tracker(total_steps)
-    git_config, env_vars = ask_git_provider(total_steps)
-    cli_config = ask_cli_adapter(total_steps)
-    notif_config = ask_notification(total_steps)
-    pipeline_config = ask_pipeline(total_steps)
+    # Collect all config — pass prev values as defaults
+    repo_config = ask_repo(total_steps, prev)
+    tracker_config = ask_issue_tracker(total_steps, prev)
+    git_config, env_vars = ask_git_provider(total_steps, prev, prev_env)
+    cli_config = ask_cli_adapter(total_steps, prev)
+    notif_config = ask_notification(total_steps, prev)
+    pipeline_config = ask_pipeline(total_steps, prev)
 
     # Assemble
     full_config = {
