@@ -32,6 +32,8 @@ ISSUE_TRACKER_DEFAULTS = {
     "jira": {
         "trigger_label": "Trigger status",
         "trigger_default": "Ready for Development",
+        "development_label": "Development status",
+        "development_default": "Development",
         "done_label": "Done status",
         "done_default": "Done",
         "blocked_label": "Blocked status",
@@ -40,6 +42,8 @@ ISSUE_TRACKER_DEFAULTS = {
     "github-issues": {
         "trigger_label": "Trigger label",
         "trigger_default": "ready-for-dev",
+        "development_label": "Development label",
+        "development_default": "in-progress",
         "done_label": "Done label",
         "done_default": "done",
         "blocked_label": "Blocked label",

@@ -247,8 +247,17 @@ def ask_issue_tracker(total_steps: int, prev: dict | None = None) -> dict:
         f"{defaults['trigger_label']} (starts the pipeline):",
         default=p.get("triggerStatus", defaults["trigger_default"]), style=STYLE
     ).ask()
+
+    console.print()
+    info("When the pipeline picks up a ticket, it transitions to this status.")
+    info("This shows the team that AI agents are actively working on it.")
+    config["developmentStatus"] = questionary.text(
+        f"{defaults['development_label']} (while agents are working):",
+        default=p.get("developmentStatus", defaults["development_default"]), style=STYLE
+    ).ask()
+
     config["doneStatus"] = questionary.text(
-        f"{defaults['done_label']} (after merge):",
+        f"{defaults['done_label']} (after MR created):",
         default=p.get("doneStatus", defaults["done_default"]), style=STYLE
     ).ask()
 
@@ -479,6 +488,7 @@ def show_summary(config: dict, env_vars: dict, total_steps: int):
 
     table.add_row("Issue tracker", config["issueTracker"]["type"])
     table.add_row("Trigger", config["issueTracker"].get("triggerStatus", ""))
+    table.add_row("Development", config["issueTracker"].get("developmentStatus", ""))
     table.add_row("Done status", config["issueTracker"].get("doneStatus", ""))
     table.add_row("Blocked status", config["issueTracker"].get("blockedStatus", ""))
     table.add_row("", "")
