@@ -102,11 +102,14 @@ class GitProviderBase(ABC):
         ...
 
     @abstractmethod
-    def create_api(self, env: dict):
+    def create_api(self, env: dict, repo_dir: str | None = None):
         """Create an API client for this git provider.
 
         Args:
             env: Environment variables (contains tokens like GITLAB_TOKEN).
+            repo_dir: Path to the target repo. Used to derive project
+                identifiers (owner/repo/project_id) from git remote URL
+                when not explicitly set in env.
 
         Returns:
             Object implementing all methods in REQUIRED_API_METHODS.

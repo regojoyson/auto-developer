@@ -94,29 +94,32 @@ class GitLabAdapter(GitProviderBase):
 
         return None
 
-    def create_api(self, env):
+    def create_api(self, env, repo_dir: str | None = None):
         """Create a GitLab REST API client.
 
-        Builds an authenticated httpx client targeting the GitLab v4 API
-        and returns an inner ``Api`` object that implements all required
-        git provider methods (create_branch, commit_files, create_pr, etc.).
+        If GITLAB_PROJECT_ID is set in env, uses it directly. Otherwise
+        derives the project ID from the repo's git remote URL via the
+        GitLab API.
 
         Args:
-            env: Environment variables dict. Required keys:
-                ``GITLAB_TOKEN``, ``GITLAB_PROJECT_ID``. Optional:
-                ``GITLAB_BASE_URL`` (defaults to ``https://gitlab.com``).
+            env: Environment variables dict. Required: ``GITLAB_TOKEN``.
+                Optional: ``GITLAB_BASE_URL``, ``GITLAB_PROJECT_ID``.
+            repo_dir: Path to the repo (used to derive project ID from
+                git remote if GITLAB_PROJECT_ID is not set).
 
         Returns:
-            Api: An object implementing all methods defined in
-                :attr:`GitProviderBase.REQUIRED_API_METHODS`.
-
-        Raises:
-            NotImplementedError: If the returned Api object is missing
-                any required method (checked by ``validate_api``).
-            KeyError: If required environment variables are missing.
+            Api: An object implementing all required git provider methods.
         """
         base_url = env.get("GITLAB_BASE_URL", "https://gitlab.com").rstrip("/")
-        project_id = env["GITLAB_PROJECT_ID"]
+
+        # Derive project ID from git remote if not set
+        project_id = env.get("GITLAB_PROJECT_ID")
+        if not project_id and repo_dir:
+            from src.repos.git_remote import get_remote_info
+            info = get_remote_info(repo_dir, "gitlab")
+            project_id = info.get("project_id")
+        if not project_id:
+            raise ValueError("GITLAB_PROJECT_ID not set and could not be derived from git remote")
         client = httpx.Client(
             base_url=f"{base_url}/api/v4",
             headers={"PRIVATE-TOKEN": env["GITLAB_TOKEN"], "Content-Type": "application/json"},

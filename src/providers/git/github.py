@@ -103,28 +103,32 @@ class GitHubAdapter(GitProviderBase):
 
         return None
 
-    def create_api(self, env):
+    def create_api(self, env, repo_dir: str | None = None):
         """Create a GitHub REST API client.
 
-        Builds an authenticated httpx client targeting the GitHub API v3
-        and returns an inner ``Api`` object that implements all required
-        git provider methods.
+        If GITHUB_OWNER and GITHUB_REPO are set in env, uses them directly.
+        Otherwise derives owner/repo from the repo's git remote URL.
 
         Args:
-            env: Environment variables dict. Required keys:
-                ``GITHUB_TOKEN``, ``GITHUB_OWNER``, ``GITHUB_REPO``.
+            env: Environment variables dict. Required: ``GITHUB_TOKEN``.
+                Optional: ``GITHUB_OWNER``, ``GITHUB_REPO``.
+            repo_dir: Path to the repo (used to derive owner/repo from
+                git remote if not set in env).
 
         Returns:
-            Api: An object implementing all methods defined in
-                :attr:`GitProviderBase.REQUIRED_API_METHODS`.
-
-        Raises:
-            NotImplementedError: If the returned Api object is missing
-                any required method (checked by ``validate_api``).
-            KeyError: If required environment variables are missing.
+            Api: An object implementing all required git provider methods.
         """
-        owner = env["GITHUB_OWNER"]
-        repo = env["GITHUB_REPO"]
+        owner = env.get("GITHUB_OWNER")
+        repo = env.get("GITHUB_REPO")
+
+        # Derive from git remote if not set
+        if (not owner or not repo) and repo_dir:
+            from src.repos.git_remote import get_remote_info
+            info = get_remote_info(repo_dir, "github")
+            owner = owner or info.get("owner", "")
+            repo = repo or info.get("repo", "")
+        if not owner or not repo:
+            raise ValueError("GITHUB_OWNER/GITHUB_REPO not set and could not be derived from git remote")
         client = httpx.Client(
             base_url="https://api.github.com",
             headers={"Authorization": f"Bearer {env['GITHUB_TOKEN']}", "Accept": "application/vnd.github.v3+json"},

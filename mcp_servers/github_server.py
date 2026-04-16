@@ -23,29 +23,30 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
-GITHUB_OWNER = os.environ["GITHUB_OWNER"]
-GITHUB_REPO = os.environ["GITHUB_REPO"]
+GITHUB_OWNER = os.environ.get("GITHUB_OWNER", "")  # optional — can be passed per tool call
+GITHUB_REPO = os.environ.get("GITHUB_REPO", "")    # optional — can be passed per tool call
 
 client = httpx.Client(
     base_url="https://api.github.com",
     headers={"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"},
 )
-R = f"/repos/{GITHUB_OWNER}/{GITHUB_REPO}"
+
+
+def _r(owner: str = "", repo: str = "") -> str:
+    """Resolve the repo path prefix. Uses provided values or falls back to env."""
+    o = owner or GITHUB_OWNER
+    r = repo or GITHUB_REPO
+    if not o or not r:
+        raise ValueError("owner and repo are required (pass as parameters or set GITHUB_OWNER/GITHUB_REPO env vars)")
+    return f"/repos/{o}/{r}"
 
 mcp = FastMCP("github-mcp")
 
 
 @mcp.tool()
-def create_branch(branch_name: str, ref: str = "main") -> str:
-    """Create a new branch from a reference.
-
-    Args:
-        branch_name: Name for the new branch.
-        ref: Source branch to create the branch from.
-
-    Returns:
-        JSON string with the git ref and SHA.
-    """
+def create_branch(branch_name: str, ref: str = "main", owner: str = "", repo: str = "") -> str:
+    """Create a new branch. owner/repo auto-detected if not provided."""
+    R = _r(owner, repo)
     ref_data = client.get(f"{R}/git/ref/heads/{ref}").json()
     sha = ref_data["object"]["sha"]
     data = client.post(f"{R}/git/refs", json={"ref": f"refs/heads/{branch_name}", "sha": sha}).json()
@@ -53,22 +54,9 @@ def create_branch(branch_name: str, ref: str = "main") -> str:
 
 
 @mcp.tool()
-def commit_files(branch: str, commit_message: str, actions: str) -> str:
-    """Commit one or more file changes to a branch.
-
-    Processes each action sequentially via the GitHub Contents API.
-    Supports create, update, and delete operations.
-
-    Args:
-        branch: Target branch name.
-        commit_message: Message for the commit(s).
-        actions: JSON-encoded array of action objects. Each object must
-            have keys ``action`` (``"create"``, ``"update"``, or
-            ``"delete"``), ``file_path``, and ``content``.
-
-    Returns:
-        JSON string with ``committed`` (bool) and ``files`` (count).
-    """
+def commit_files(branch: str, commit_message: str, actions: str, owner: str = "", repo: str = "") -> str:
+    """Commit file changes. actions: JSON array [{"action":"create|update|delete","file_path":"...","content":"..."}]"""
+    R = _r(owner, repo)
     parsed = json.loads(actions)
     for action in parsed:
         path = action["file_path"]
@@ -90,49 +78,25 @@ def commit_files(branch: str, commit_message: str, actions: str) -> str:
 
 
 @mcp.tool()
-def create_pull_request(source_branch: str, target_branch: str, title: str, description: str) -> str:
-    """Create a pull request from source to target branch.
-
-    Args:
-        source_branch: Head branch containing the changes.
-        target_branch: Base branch to merge into.
-        title: Pull request title.
-        description: Pull request body text.
-
-    Returns:
-        JSON string with the PR number, HTML URL, title, and state.
-    """
+def create_pull_request(source_branch: str, target_branch: str, title: str, description: str, owner: str = "", repo: str = "") -> str:
+    """Create a pull request."""
+    R = _r(owner, repo)
     data = client.post(f"{R}/pulls", json={"head": source_branch, "base": target_branch, "title": title, "body": description}).json()
     return json.dumps({"number": data.get("number"), "html_url": data.get("html_url"), "title": data.get("title"), "state": data.get("state")}, indent=2)
 
 
 @mcp.tool()
-def get_pull_request(pr_number: str) -> str:
-    """Get pull request details by number.
-
-    Args:
-        pr_number: The pull request number.
-
-    Returns:
-        JSON string with the PR number, title, state, head/base refs,
-        HTML URL, and body.
-    """
+def get_pull_request(pr_number: str, owner: str = "", repo: str = "") -> str:
+    """Get pull request details."""
+    R = _r(owner, repo)
     data = client.get(f"{R}/pulls/{pr_number}").json()
     return json.dumps({"number": data.get("number"), "title": data.get("title"), "state": data.get("state"), "head": data.get("head", {}).get("ref"), "base": data.get("base", {}).get("ref"), "html_url": data.get("html_url"), "body": data.get("body")}, indent=2)
 
 
 @mcp.tool()
-def update_pull_request(pr_number: str, title: str = "", description: str = "") -> str:
-    """Update a pull request's title or description.
-
-    Args:
-        pr_number: The pull request number.
-        title: New title (empty string to leave unchanged).
-        description: New description (empty string to leave unchanged).
-
-    Returns:
-        JSON string with the updated PR number, title, and state.
-    """
+def update_pull_request(pr_number: str, title: str = "", description: str = "", owner: str = "", repo: str = "") -> str:
+    """Update a pull request."""
+    R = _r(owner, repo)
     updates = {}
     if title:
         updates["title"] = title
@@ -143,19 +107,9 @@ def update_pull_request(pr_number: str, title: str = "", description: str = "") 
 
 
 @mcp.tool()
-def list_pr_comments(pr_number: str) -> str:
-    """List all comments on a pull request, sorted by creation date.
-
-    Merges both issue comments and review comments into a single list.
-
-    Args:
-        pr_number: The pull request number.
-
-    Returns:
-        JSON string with an array of comment objects, each containing
-        ``id``, ``author``, ``body``, ``created_at``, and optionally
-        ``path`` and ``line`` for review comments.
-    """
+def list_pr_comments(pr_number: str, owner: str = "", repo: str = "") -> str:
+    """List all comments on a pull request."""
+    R = _r(owner, repo)
     issue = client.get(f"{R}/issues/{pr_number}/comments").json()
     review = client.get(f"{R}/pulls/{pr_number}/comments").json()
     all_comments = [
@@ -167,31 +121,17 @@ def list_pr_comments(pr_number: str) -> str:
 
 
 @mcp.tool()
-def post_pr_comment(pr_number: str, body: str) -> str:
-    """Post a comment on a pull request.
-
-    Args:
-        pr_number: The pull request number.
-        body: Comment text to post.
-
-    Returns:
-        JSON string with the created comment ``id`` and ``body``.
-    """
+def post_pr_comment(pr_number: str, body: str, owner: str = "", repo: str = "") -> str:
+    """Post a comment on a pull request."""
+    R = _r(owner, repo)
     data = client.post(f"{R}/issues/{pr_number}/comments", json={"body": body}).json()
     return json.dumps({"id": data.get("id"), "body": data.get("body")}, indent=2)
 
 
 @mcp.tool()
-def get_file(file_path: str, ref: str = "main") -> str:
-    """Read a file's content from the repository.
-
-    Args:
-        file_path: Path to the file within the repository.
-        ref: Branch name, tag, or commit SHA to read from.
-
-    Returns:
-        The decoded UTF-8 file content as a string.
-    """
+def get_file(file_path: str, ref: str = "main", owner: str = "", repo: str = "") -> str:
+    """Read a file from the repository."""
+    R = _r(owner, repo)
     data = client.get(f"{R}/contents/{file_path}", params={"ref": ref}).json()
     return b64decode(data.get("content", "")).decode("utf-8")
 

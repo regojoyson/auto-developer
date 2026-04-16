@@ -91,13 +91,10 @@ set -a; source .env 2>/dev/null; set +a
 
 if [ "$GIT_PROVIDER" = "gitlab" ]; then
   [ -z "$GITLAB_TOKEN" ] && fail "GITLAB_TOKEN not set in .env"
-  [ -z "$GITLAB_PROJECT_ID" ] && fail "GITLAB_PROJECT_ID not set in .env"
-  ok "GitLab tokens OK"
+  ok "GitLab token OK (project ID auto-detected from git remote)"
 elif [ "$GIT_PROVIDER" = "github" ]; then
   [ -z "$GITHUB_TOKEN" ] && fail "GITHUB_TOKEN not set in .env"
-  [ -z "$GITHUB_OWNER" ] && fail "GITHUB_OWNER not set in .env"
-  [ -z "$GITHUB_REPO" ] && fail "GITHUB_REPO not set in .env"
-  ok "GitHub tokens OK"
+  ok "GitHub token OK (owner/repo auto-detected from git remote)"
 fi
 
 # ── 6. Validate repo ─────────────────────────────────
@@ -124,11 +121,11 @@ mkdir -p "$CLI_CONFIG_DIR"
 
 if [ "$GIT_PROVIDER" = "gitlab" ]; then
   cat > "$CLI_CONFIG_DIR/settings.json" << 'EOF'
-{"mcpServers":{"git-provider":{"command":"python3","args":["mcp_servers/gitlab_server.py"],"env":{"GITLAB_BASE_URL":"${GITLAB_BASE_URL}","GITLAB_TOKEN":"${GITLAB_TOKEN}","GITLAB_PROJECT_ID":"${GITLAB_PROJECT_ID}"}}}}
+{"mcpServers":{"git-provider":{"command":"python3","args":["mcp_servers/gitlab_server.py"],"env":{"GITLAB_BASE_URL":"${GITLAB_BASE_URL}","GITLAB_TOKEN":"${GITLAB_TOKEN}"}}}}
 EOF
 elif [ "$GIT_PROVIDER" = "github" ]; then
   cat > "$CLI_CONFIG_DIR/settings.json" << 'EOF'
-{"mcpServers":{"git-provider":{"command":"python3","args":["mcp_servers/github_server.py"],"env":{"GITHUB_TOKEN":"${GITHUB_TOKEN}","GITHUB_OWNER":"${GITHUB_OWNER}","GITHUB_REPO":"${GITHUB_REPO}"}}}}
+{"mcpServers":{"git-provider":{"command":"python3","args":["mcp_servers/github_server.py"],"env":{"GITHUB_TOKEN":"${GITHUB_TOKEN}"}}}}
 EOF
 fi
 ok "MCP config: $GIT_PROVIDER → $CLI_CONFIG_DIR/settings.json"

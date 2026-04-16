@@ -55,12 +55,9 @@ GIT_PROVIDER_ENV = {
     "gitlab": [
         {"key": "GITLAB_BASE_URL", "label": "GitLab URL", "default": "https://gitlab.com", "secret": False},
         {"key": "GITLAB_TOKEN", "label": "GitLab token (api scope)", "default": "", "secret": True},
-        {"key": "GITLAB_PROJECT_ID", "label": "GitLab project ID (numeric)", "default": "", "secret": False},
     ],
     "github": [
         {"key": "GITHUB_TOKEN", "label": "GitHub token", "default": "", "secret": True},
-        {"key": "GITHUB_OWNER", "label": "GitHub owner (org or username)", "default": "", "secret": False},
-        {"key": "GITHUB_REPO", "label": "GitHub repo name", "default": "", "secret": False},
     ],
 }
 

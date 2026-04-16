@@ -245,8 +245,9 @@ def ask_git_provider(total_steps: int) -> tuple[dict, dict]:
     step(3, total_steps, "Git Provider + Tokens",
          "Where is your git remote? We need API tokens to create branches, PRs, and commit code.")
 
+    info("Only your API [bold]token[/bold] is needed — project IDs and owner/repo")
+    info("are [bold]auto-detected[/bold] from each repo's git remote URL at runtime.")
     info("Tokens are stored in [cyan].env[/cyan] (never committed to git).")
-    info("The pipeline uses these to interact with your git provider's API.")
     console.print()
 
     provider_type = questionary.select(
@@ -263,15 +264,17 @@ def ask_git_provider(total_steps: int) -> tuple[dict, dict]:
         console.print()
         info("How to get a GitLab token:")
         info("  1. Go to GitLab → Settings → Access Tokens")
-        info("  2. Create token with [bold]api[/bold] scope")
-        info("  3. Copy the token and your numeric project ID")
+        info("  2. Create a token with [bold]api[/bold] scope")
+        info("  3. Copy the token — that's all you need")
+        info("  [dim]Project IDs are auto-detected from git remote URLs[/dim]")
         console.print()
     elif provider_type == "github":
         console.print()
         info("How to get a GitHub token:")
         info("  1. Go to GitHub → Settings → Developer Settings → Personal Access Tokens")
         info("  2. Create a fine-grained token with: Contents (R/W), Pull Requests (R/W)")
-        info("  3. Copy the token, your org/username, and repo name")
+        info("  3. Copy the token — that's all you need")
+        info("  [dim]Owner and repo name are auto-detected from git remote URLs[/dim]")
         console.print()
 
     for var_def in GIT_PROVIDER_ENV[provider_type]:
