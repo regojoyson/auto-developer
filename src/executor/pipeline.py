@@ -14,6 +14,7 @@ Usage:
 
 import json
 import logging
+import subprocess
 
 from src.executor.runner import run_agent
 from src.state.manager import (
@@ -25,6 +26,7 @@ from src.state.manager import (
 from src.providers.issue_tracker import get_issue_tracker
 from src.providers.notification import get_notification
 from src.providers.output_handler import get_output_handlers
+from src.repos.resolver import get_base_branch
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,61 @@ PHASE_NAMES = {
     "orchestrator:rework": "Rework — Apply Fixes",
     "feedback-parser": "Rework — Parse Feedback",
 }
+
+
+def _prepare_repo_for_branch(repo_dir, base_branch, feature_branch=None):
+    """Ensure repo is clean and on latest base branch before agent work.
+
+    Steps:
+    1. git stash --include-untracked (save any leftover changes)
+    2. git checkout <baseBranch>
+    3. git fetch origin
+    4. git reset --hard origin/<baseBranch>
+    5. If feature_branch exists on remote, checkout it
+
+    Args:
+        repo_dir: Absolute path to the repo directory.
+        base_branch: Base branch name (e.g. "main", "prod").
+        feature_branch: Optional feature branch to checkout after pull.
+    """
+    def run(cmd):
+        try:
+            result = subprocess.run(cmd, cwd=repo_dir, capture_output=True, text=True)
+            return result.stdout.strip()
+        except Exception:
+            return None
+
+    # 1. Stash any uncommitted changes
+    stash_result = run(["git", "stash", "--include-untracked"])
+    if stash_result and "No local changes" not in stash_result:
+        logger.info(f"Stashed uncommitted changes in {repo_dir}")
+
+    # 2. Checkout base branch
+    run(["git", "checkout", base_branch])
+
+    # 3. Fetch latest
+    run(["git", "fetch", "origin"])
+
+    # 4. Reset to origin
+    reset_result = run(["git", "reset", "--hard", f"origin/{base_branch}"])
+    if reset_result is None:
+        run(["git", "pull"])  # fallback
+
+    logger.info(f"Repo synced to latest {base_branch}")
+
+    # 5. Checkout feature branch if it exists
+    if feature_branch:
+        # Check if branch exists locally or on remote
+        local_exists = run(["git", "rev-parse", "--verify", feature_branch])
+        remote_exists = run(["git", "rev-parse", "--verify", f"origin/{feature_branch}"])
+
+        if local_exists:
+            run(["git", "checkout", feature_branch])
+            run(["git", "pull", "origin", feature_branch])
+            logger.info(f"Checked out existing branch {feature_branch}")
+        elif remote_exists:
+            run(["git", "checkout", "-b", feature_branch, f"origin/{feature_branch}"])
+            logger.info(f"Checked out remote branch {feature_branch}")
 
 
 def _log_phase(issue_key, phase_label, message):
@@ -227,11 +284,15 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
     logger.info(f"  Repo: {repo_dir}")
     logger.info(f"{'='*60}")
 
-    # Step 1: Transition issue to Development status
+    # Step 1: Prepare repo — stash, checkout base branch, pull latest
+    _log_phase(issue_key, "orchestrator:analyze", f"Preparing repo — syncing to latest {base_branch}...")
+    _prepare_repo_for_branch(repo_dir, base_branch)
+
+    # Step 2: Transition issue to Development status
     _log_phase(issue_key, "orchestrator:analyze", "Transitioning ticket to Development...")
     _try_transition_issue(issue_key, statuses["development"])
 
-    # Step 2: Analyze phase — read ticket, write TICKET.md, post analysis comment
+    # Step 3: Analyze phase — read ticket, write TICKET.md, post analysis comment
     analyze_input = json.dumps({
         "action": "analyze",
         "issueKey": issue_key,
@@ -259,8 +320,10 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
     if result is None:
         return
 
-    # Step 4: Implement phase — developer agent codes, commits, pushes, creates MR
+    # Step 4: Implement phase — checkout feature branch, developer codes, commits, pushes, creates MR
     transition_state(branch, "developing")
+    _log_phase(issue_key, "orchestrator:implement", f"Checking out feature branch {branch}...")
+    _prepare_repo_for_branch(repo_dir, base_branch, feature_branch=branch)
     implement_input = json.dumps({
         "action": "implement",
         "issueKey": issue_key,
@@ -301,6 +364,11 @@ def run_rework_phases(issue_key, branch, pr_id, statuses, repo_dir):
     logger.info(f"{'='*60}")
     logger.info(f"  Rework started for {issue_key}")
     logger.info(f"{'='*60}")
+
+    # Prepare repo — checkout feature branch with latest changes
+    base_branch = get_base_branch()
+    _log_phase(issue_key, "orchestrator:rework", f"Preparing repo — checking out {branch}...")
+    _prepare_repo_for_branch(repo_dir, base_branch, feature_branch=branch)
 
     # Transition issue to Development
     _try_transition_issue(issue_key, statuses["development"])
