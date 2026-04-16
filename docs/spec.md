@@ -1,3 +1,7 @@
+[< Back to README](../README.md) | [Setup](setup.md) | [How It Works](how-it-works.md) | [Configuration](configuration.md) | [API Spec](api-spec.md) | [OpenAPI](openapi.yaml)
+
+---
+
 # AI-Powered Development Automation — Specification
 
 **Team:** Sentinels — Cadmium Engineering

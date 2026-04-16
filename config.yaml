@@ -1,0 +1,39 @@
+# ─── Repository ───────────────────────────────────────
+# mode: dir (one repo), parentDir (multiple repos), clone (git URL)
+repo:
+  mode: dir
+  path: /Users/admin/projects/my-project
+  baseBranch: main
+  # For clone mode:
+  # urls:
+  #   - https://github.com/org/repo.git
+  # cloneDir: /tmp/auto-pilot-repos
+
+# ─── Issue Tracker ────────────────────────────────────
+issueTracker:
+  type: jira                          # jira | github-issues
+  triggerStatus: Ready for Development
+  doneStatus: Done
+
+# ─── Git Provider ─────────────────────────────────────
+gitProvider:
+  type: gitlab                        # gitlab | github
+  botUsers:
+    - project_bot
+    - ghost
+    - ci-bot
+
+# ─── AI Coding CLI ────────────────────────────────────
+cliAdapter:
+  type: claude-code                   # claude-code | codex | gemini
+
+# ─── Notifications (optional — remove to disable) ────
+notification:
+  type: slack
+  channel: cadmium-engineering
+
+# ─── Pipeline Settings ────────────────────────────────
+pipeline:
+  maxReworkIterations: 3
+  agentTimeout: 300000
+  port: 3000

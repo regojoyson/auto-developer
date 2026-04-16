@@ -1,0 +1,379 @@
+openapi: 3.0.3
+info:
+  title: Auto Developer API
+  description: AI-Powered Development Automation Pipeline — Ticket to PR automation with pluggable providers.
+  version: 1.0.0
+  contact:
+    name: Auto Developer
+    url: https://github.com/regojoyson/auto-developer
+
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns server status and timestamp.
+      operationId: healthCheck
+      tags: [System]
+      responses:
+        '200':
+          description: Server is running
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+                    example: '2026-04-16T10:00:00.000Z'
+
+  /api/trigger:
+    post:
+      summary: Manually trigger pipeline
+      description: Start the pipeline for a ticket without waiting for a webhook. Creates a feature branch, prepares the repo, and kicks off the orchestrator agent.
+      operationId: triggerPipeline
+      tags: [Pipeline]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerRequest'
+            examples:
+              minimal:
+                summary: Minimal — just issue key
+                value:
+                  issueKey: PROJ-42
+              withDetails:
+                summary: With summary and component
+                value:
+                  issueKey: PROJ-42
+                  summary: Add login page
+                  component: frontend-app
+      responses:
+        '202':
+          description: Pipeline started (processing asynchronously)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerResponse'
+        '400':
+          description: Missing required field
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: issueKey is required
+        '409':
+          description: Pipeline already active for this ticket
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  branch:
+                    type: string
+              example:
+                error: Pipeline already active for this ticket
+                branch: feature/PROJ-42-add-login-page
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/status:
+    get:
+      summary: List all pipelines
+      description: Returns all active and completed pipeline states.
+      operationId: listPipelines
+      tags: [Pipeline]
+      responses:
+        '200':
+          description: List of all pipelines
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                    example: 2
+                  pipelines:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PipelineState'
+
+  /api/status/{issueKey}:
+    get:
+      summary: Get pipeline status
+      description: Returns the pipeline state for a specific ticket.
+      operationId: getPipelineStatus
+      tags: [Pipeline]
+      parameters:
+        - name: issueKey
+          in: path
+          required: true
+          description: Ticket identifier (e.g. PROJ-42)
+          schema:
+            type: string
+          example: PROJ-42
+      responses:
+        '200':
+          description: Pipeline found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineState'
+        '404':
+          description: Pipeline not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Pipeline not found
+                issueKey: PROJ-42
+
+  /webhooks/issue-tracker:
+    post:
+      summary: Issue tracker webhook
+      description: |
+        Receives webhooks from issue trackers (Jira, GitHub Issues).
+        The payload format depends on the configured provider.
+        Only triggers the pipeline when the status matches `triggerStatus` from config.yaml.
+      operationId: issueTrackerWebhook
+      tags: [Webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/JiraWebhookPayload'
+                - $ref: '#/components/schemas/GitHubIssuesWebhookPayload'
+      responses:
+        '202':
+          description: Pipeline started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerResponse'
+        '200':
+          description: Event ignored (wrong status, duplicate, or no match)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ignored:
+                    type: boolean
+                    example: true
+                  reason:
+                    type: string
+                    example: already active
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /webhooks/git:
+    post:
+      summary: Git provider webhook
+      description: |
+        Receives webhooks from git providers (GitLab, GitHub).
+        Handles three event types: approved (PR/MR approved), push (human edit), comment (review feedback).
+      operationId: gitProviderWebhook
+      tags: [Webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Provider-specific payload (GitLab or GitHub webhook format)
+      responses:
+        '200':
+          description: Event processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received:
+                    type: boolean
+                    example: true
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  schemas:
+    TriggerRequest:
+      type: object
+      required:
+        - issueKey
+      properties:
+        issueKey:
+          type: string
+          description: Ticket identifier (e.g. PROJ-42, my-repo#5)
+          example: PROJ-42
+        summary:
+          type: string
+          description: Ticket title. Used for branch naming. Defaults to issueKey if omitted.
+          example: Add login page
+        component:
+          type: string
+          description: Repo subdirectory name (for parentDir/clone modes). Uses default repo if omitted.
+          example: frontend-app
+
+    TriggerResponse:
+      type: object
+      properties:
+        accepted:
+          type: boolean
+          example: true
+        issueKey:
+          type: string
+          example: PROJ-42
+        branch:
+          type: string
+          example: feature/PROJ-42-add-login-page
+        repoDir:
+          type: string
+          example: /projects/frontend-app
+
+    PipelineState:
+      type: object
+      properties:
+        branch:
+          type: string
+          description: Git branch name
+          example: feature/PROJ-42-add-login-page
+        issueKey:
+          type: string
+          description: Ticket identifier
+          example: PROJ-42
+        state:
+          type: string
+          description: Current pipeline state
+          enum:
+            - brainstorming
+            - developing
+            - awaiting-review
+            - reworking
+            - merged
+          example: awaiting-review
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-04-16T09:00:00.000Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-04-16T09:15:00.000Z'
+        reworkCount:
+          type: integer
+          description: Number of rework cycles completed
+          example: 1
+        repoPath:
+          type: string
+          description: Absolute path to the repo directory
+          example: /projects/my-app
+
+    JiraWebhookPayload:
+      type: object
+      description: Jira issue_updated webhook payload
+      properties:
+        changelog:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                    example: status
+                  toString:
+                    type: string
+                    example: Ready for Development
+        issue:
+          type: object
+          properties:
+            key:
+              type: string
+              example: PROJ-42
+            fields:
+              type: object
+              properties:
+                summary:
+                  type: string
+                  example: Add login page
+                components:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        example: frontend-app
+
+    GitHubIssuesWebhookPayload:
+      type: object
+      description: GitHub Issues webhook payload (labeled event)
+      properties:
+        action:
+          type: string
+          example: labeled
+        label:
+          type: object
+          properties:
+            name:
+              type: string
+              example: ready-for-dev
+        issue:
+          type: object
+          properties:
+            number:
+              type: integer
+              example: 5
+            title:
+              type: string
+              example: Add login page
+        repository:
+          type: object
+          properties:
+            name:
+              type: string
+              example: my-repo
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+
+  responses:
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Internal server error
+
+tags:
+  - name: System
+    description: Server health and status
+  - name: Pipeline
+    description: Trigger and monitor pipelines
+  - name: Webhooks
+    description: Webhook endpoints for issue trackers and git providers

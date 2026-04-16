@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" font-family="system-ui, -apple-system, sans-serif" font-size="13">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#555"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#3b82f6"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#22c55e"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#f97316"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="520" fill="#fafafa" rx="8"/>
+
+  <!-- Title -->
+  <text x="450" y="30" text-anchor="middle" font-size="18" font-weight="bold" fill="#1e293b">Auto Developer — Pipeline Architecture</text>
+
+  <!-- ═══ Left column: Triggers ═══ -->
+  <!-- Jira -->
+  <rect x="30" y="70" width="140" height="50" rx="8" fill="#2563eb" opacity="0.9"/>
+  <text x="100" y="92" text-anchor="middle" fill="white" font-weight="600">Jira</text>
+  <text x="100" y="108" text-anchor="middle" fill="white" font-size="10">ticket → Ready</text>
+
+  <!-- GitHub Issues -->
+  <rect x="30" y="135" width="140" height="50" rx="8" fill="#1f2937"/>
+  <text x="100" y="157" text-anchor="middle" fill="white" font-weight="600">GitHub Issues</text>
+  <text x="100" y="173" text-anchor="middle" fill="white" font-size="10">issue labeled</text>
+
+  <!-- Manual API -->
+  <rect x="30" y="200" width="140" height="50" rx="8" fill="#7c3aed"/>
+  <text x="100" y="222" text-anchor="middle" fill="white" font-weight="600">Manual API</text>
+  <text x="100" y="238" text-anchor="middle" fill="white" font-size="10">POST /api/trigger</text>
+
+  <!-- Arrows from triggers to webhook server -->
+  <line x1="170" y1="95" x2="225" y2="160" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="170" y1="160" x2="225" y2="160" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="170" y1="225" x2="225" y2="160" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ═══ Webhook Server ═══ -->
+  <rect x="230" y="120" width="130" height="80" rx="8" fill="#e0f2fe" stroke="#3b82f6" stroke-width="2"/>
+  <text x="295" y="152" text-anchor="middle" font-weight="600" fill="#1e40af">Webhook</text>
+  <text x="295" y="170" text-anchor="middle" font-weight="600" fill="#1e40af">Server</text>
+  <text x="295" y="188" text-anchor="middle" font-size="10" fill="#3b82f6">Express.js</text>
+
+  <!-- Arrow to orchestrator -->
+  <line x1="360" y1="160" x2="410" y2="160" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+  <!-- ═══ Center: Agent Pipeline ═══ -->
+  <!-- Orchestrator -->
+  <rect x="415" y="70" width="150" height="50" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="490" y="92" text-anchor="middle" font-weight="600" fill="#1e40af">Orchestrator</text>
+  <text x="490" y="108" text-anchor="middle" font-size="10" fill="#3b82f6">creates branch + TICKET.md</text>
+
+  <!-- Brainstorm -->
+  <rect x="415" y="140" width="150" height="50" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="490" y="162" text-anchor="middle" font-weight="600" fill="#92400e">Brainstorm</text>
+  <text x="490" y="178" text-anchor="middle" font-size="10" fill="#b45309">writes PLAN.md</text>
+
+  <!-- Developer -->
+  <rect x="415" y="210" width="150" height="50" rx="8" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="490" y="232" text-anchor="middle" font-weight="600" fill="#166534">Developer</text>
+  <text x="490" y="248" text-anchor="middle" font-size="10" fill="#15803d">implements code</text>
+
+  <!-- Arrows between agents -->
+  <line x1="490" y1="120" x2="490" y2="138" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="490" y1="190" x2="490" y2="208" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ═══ Right: PR + Review ═══ -->
+  <!-- PR Created -->
+  <rect x="415" y="285" width="150" height="50" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="490" y="307" text-anchor="middle" font-weight="700" fill="#166534">PR / MR</text>
+  <text x="490" y="323" text-anchor="middle" font-size="10" fill="#15803d">auto-created</text>
+
+  <line x1="490" y1="260" x2="490" y2="283" stroke="#22c55e" stroke-width="2" marker-end="url(#arrow-green)"/>
+
+  <!-- Human Reviewer -->
+  <rect x="650" y="285" width="140" height="50" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+  <text x="720" y="307" text-anchor="middle" font-weight="600" fill="#991b1b">Human</text>
+  <text x="720" y="323" text-anchor="middle" font-size="10" fill="#b91c1c">reviews diff</text>
+
+  <line x1="565" y1="310" x2="648" y2="310" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Three review outcomes -->
+  <!-- Approve -->
+  <rect x="690" y="365" width="100" height="40" rx="6" fill="#22c55e"/>
+  <text x="740" y="390" text-anchor="middle" fill="white" font-weight="600">Approve</text>
+
+  <!-- Feedback -->
+  <rect x="560" y="365" width="110" height="40" rx="6" fill="#f97316"/>
+  <text x="615" y="390" text-anchor="middle" fill="white" font-weight="600">Feedback</text>
+
+  <!-- Lines from reviewer to outcomes -->
+  <line x1="720" y1="335" x2="740" y2="363" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <line x1="700" y1="335" x2="620" y2="363" stroke="#f97316" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+
+  <!-- Feedback loop back to developer -->
+  <!-- Feedback Parser -->
+  <rect x="415" y="365" width="120" height="40" rx="6" fill="#fed7aa" stroke="#f97316" stroke-width="1"/>
+  <text x="475" y="382" text-anchor="middle" font-size="11" font-weight="600" fill="#9a3412">Feedback</text>
+  <text x="475" y="396" text-anchor="middle" font-size="11" font-weight="600" fill="#9a3412">Parser</text>
+
+  <line x1="558" y1="385" x2="537" y2="385" stroke="#f97316" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+
+  <!-- Loop arrow back up to developer -->
+  <path d="M 415 385 L 385 385 L 385 235 L 413 235" fill="none" stroke="#f97316" stroke-width="1.5" marker-end="url(#arrow-orange)" stroke-dasharray="5,3"/>
+
+  <!-- Approve → Done -->
+  <rect x="700" y="425" width="80" height="35" rx="6" fill="#166534"/>
+  <text x="740" y="448" text-anchor="middle" fill="white" font-weight="600">Done</text>
+  <line x1="740" y1="405" x2="740" y2="423" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+  <!-- ═══ Bottom: Git Provider ═══ -->
+  <rect x="630" y="70" width="130" height="50" rx="8" fill="#f3f4f6" stroke="#6b7280" stroke-width="1.5"/>
+  <text x="695" y="92" text-anchor="middle" font-weight="600" fill="#374151">Git Provider</text>
+  <text x="695" y="108" text-anchor="middle" font-size="10" fill="#6b7280">GitLab / GitHub</text>
+
+  <!-- Arrow from orchestrator to git -->
+  <line x1="565" y1="95" x2="628" y2="95" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ═══ Bottom: CLI Adapter ═══ -->
+  <rect x="630" y="140" width="130" height="50" rx="8" fill="#f3f4f6" stroke="#6b7280" stroke-width="1.5"/>
+  <text x="695" y="162" text-anchor="middle" font-weight="600" fill="#374151">CLI Adapter</text>
+  <text x="695" y="178" text-anchor="middle" font-size="10" fill="#6b7280">Claude / Codex / Gemini</text>
+
+  <!-- Arrow from agents to CLI -->
+  <line x1="565" y1="165" x2="628" y2="165" stroke="#555" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- ═══ Legend ═══ -->
+  <rect x="30" y="430" width="340" height="80" rx="6" fill="white" stroke="#e5e7eb"/>
+  <text x="45" y="450" font-size="11" font-weight="600" fill="#374151">Legend</text>
+  <rect x="45" y="460" width="12" height="12" rx="2" fill="#3b82f6"/>
+  <text x="63" y="471" font-size="11" fill="#555">Webhook / Infrastructure</text>
+  <rect x="45" y="480" width="12" height="12" rx="2" fill="#f59e0b"/>
+  <text x="63" y="491" font-size="11" fill="#555">Planning</text>
+  <rect x="185" y="460" width="12" height="12" rx="2" fill="#22c55e"/>
+  <text x="203" y="471" font-size="11" fill="#555">Implementation</text>
+  <rect x="185" y="480" width="12" height="12" rx="2" fill="#f97316"/>
+  <text x="203" y="491" font-size="11" fill="#555">Feedback loop</text>
+
+  <!-- Pluggable label -->
+  <text x="695" y="210" text-anchor="middle" font-size="10" fill="#9ca3af" font-style="italic">All providers are pluggable</text>
+</svg>

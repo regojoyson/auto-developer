@@ -1,123 +1,139 @@
 /**
  * @module repos/resolver
- * @description Resolves which repo directory to run agents in.
+ * @description Resolves repo directories from config.yaml.
  *
- * Two modes configured in `repos.json`:
+ * Three modes:
+ *   - **dir**: one local repo directory
+ *   - **parentDir**: parent directory where each subdirectory is a repo
+ *   - **clone**: one or more git URLs, cloned on first use
  *
- * **"multi"** — A parent directory where every subdirectory is a repo.
- *   The agent runs in whichever subdirectory name matches the Jira ticket
- *   context, or the caller specifies the repo name explicitly.
- *
- * **"single"** — One repo directory. All tickets use it.
- *
- * @example repos.json (multi-repo)
- *   { "mode": "multi", "multi": { "parentDir": "/projects" } }
- *   // /projects/frontend-app/, /projects/backend-api/, etc.
- *
- * @example repos.json (single repo / mono-repo)
- *   { "mode": "single", "single": { "repoDir": "/projects/my-app" } }
+ * Also handles `baseBranch` and `prepareRepo()` to ensure the local
+ * repo is on the latest base branch before agents start working.
  */
 
 const fs = require('fs');
 const path = require('path');
-
-const REPOS_CONFIG_PATH = path.resolve(__dirname, '../../repos.json');
-
-/** @type {object|null} Cached parsed config */
-let configCache = null;
+const { execSync } = require('child_process');
+const config = require('../config');
+const logger = require('../utils/logger');
 
 /**
- * Load and cache repos.json.
- * @returns {object} Parsed config
- */
-function loadConfig() {
-  if (configCache) return configCache;
-
-  if (!fs.existsSync(REPOS_CONFIG_PATH)) {
-    throw new Error(
-      `repos.json not found at ${REPOS_CONFIG_PATH}. Create it — see README for format.`
-    );
-  }
-
-  configCache = JSON.parse(fs.readFileSync(REPOS_CONFIG_PATH, 'utf-8'));
-  return configCache;
-}
-
-/** Clear the cached config (for tests). */
-function clearCache() {
-  configCache = null;
-}
-
-/**
- * Get the repo directory for a given repo name.
+ * Get the repo directory for a given component name.
  *
- * - In **single** mode: always returns the configured `repoDir`, `repoName` is ignored.
- * - In **multi** mode: returns `<parentDir>/<repoName>`.
+ * - **dir**: always returns config.repo.path (component ignored)
+ * - **parentDir**: returns `<path>/<component>` or `<path>` if no component
+ * - **clone**: clones URLs into cloneDir, returns the matching repo dir
  *
- * @param {string} [repoName] - Subdirectory name (only used in multi mode)
+ * @param {string} [component] - Subdirectory or repo name (for parentDir/clone modes)
  * @returns {string} Absolute path to the repo directory
  */
-function getRepoDir(repoName) {
-  const config = loadConfig();
+function getRepoDir(component) {
+  const { mode } = config.repo;
 
-  if (config.mode === 'single') {
-    const dir = config.single?.repoDir;
-    if (!dir) throw new Error('repos.json: "single.repoDir" is required in single mode');
-    return dir;
+  if (mode === 'dir') {
+    return config.repo.path;
   }
 
-  // multi mode
-  const parentDir = config.multi?.parentDir;
-  if (!parentDir) throw new Error('repos.json: "multi.parentDir" is required in multi mode');
-
-  if (!repoName) {
-    // No specific repo requested — return parentDir itself
-    // (caller can list subdirectories to pick one)
-    return parentDir;
+  if (mode === 'parentDir') {
+    if (!component) return config.repo.path;
+    return path.join(config.repo.path, component);
   }
 
-  return path.join(parentDir, repoName);
+  if (mode === 'clone') {
+    const cloneDir = config.repo.cloneDir;
+    if (!fs.existsSync(cloneDir)) {
+      fs.mkdirSync(cloneDir, { recursive: true });
+    }
+
+    // Clone all URLs that haven't been cloned yet
+    for (const url of config.repo.urls) {
+      const repoName = path.basename(url, '.git');
+      const targetDir = path.join(cloneDir, repoName);
+      if (!fs.existsSync(targetDir)) {
+        logger.info(`Cloning ${url} into ${targetDir}`);
+        execSync(`git clone ${url} ${targetDir}`, { stdio: 'inherit' });
+      }
+    }
+
+    // If one URL, return it directly
+    if (config.repo.urls.length === 1) {
+      const repoName = path.basename(config.repo.urls[0], '.git');
+      return path.join(cloneDir, repoName);
+    }
+
+    // Multiple URLs — pick by component or return cloneDir
+    if (component) {
+      return path.join(cloneDir, component);
+    }
+    return cloneDir;
+  }
+
+  throw new Error(`Unknown repo mode: "${mode}". Supported: dir, parentDir, clone`);
 }
 
 /**
- * Get the parent directory (multi mode) or the single repo dir.
- * @returns {string} The base directory path
+ * Get the configured base branch.
+ * @returns {string} Base branch name (e.g. 'main', 'master', 'develop')
  */
-function getBaseDir() {
-  const config = loadConfig();
-  if (config.mode === 'single') {
-    return config.single?.repoDir;
+function getBaseBranch() {
+  return config.repo.baseBranch;
+}
+
+/**
+ * Prepare a repo for a new ticket — checkout baseBranch and pull latest.
+ * Call this before creating a feature branch.
+ *
+ * @param {string} repoDir - Absolute path to the repo directory
+ */
+function prepareRepo(repoDir) {
+  const baseBranch = getBaseBranch();
+  logger.info(`Preparing repo: checkout ${baseBranch} and pull latest`, { repoDir });
+  try {
+    execSync(`git checkout ${baseBranch} && git pull`, {
+      cwd: repoDir,
+      stdio: 'pipe',
+    });
+  } catch (err) {
+    logger.warn(`Failed to prepare repo (may not be a git repo or branch doesn't exist): ${err.message}`);
   }
-  return config.multi?.parentDir;
 }
 
 /**
  * List all repo directories.
- * - Single mode: returns the one configured directory.
- * - Multi mode: lists subdirectories of parentDir.
- * @returns {string[]} Array of absolute repo paths
+ * @returns {string[]}
  */
 function listRepos() {
-  const config = loadConfig();
+  const { mode } = config.repo;
 
-  if (config.mode === 'single') {
-    return [config.single.repoDir];
+  if (mode === 'dir') {
+    return [config.repo.path];
   }
 
-  const parentDir = config.multi?.parentDir;
-  if (!parentDir || !fs.existsSync(parentDir)) return [];
+  if (mode === 'parentDir') {
+    const parentDir = config.repo.path;
+    if (!parentDir || !fs.existsSync(parentDir)) return [];
+    return fs.readdirSync(parentDir, { withFileTypes: true })
+      .filter(d => d.isDirectory() && !d.name.startsWith('.'))
+      .map(d => path.join(parentDir, d.name));
+  }
 
-  return fs.readdirSync(parentDir, { withFileTypes: true })
-    .filter(d => d.isDirectory() && !d.name.startsWith('.'))
-    .map(d => path.join(parentDir, d.name));
+  if (mode === 'clone') {
+    const cloneDir = config.repo.cloneDir;
+    return config.repo.urls.map(url => {
+      const repoName = path.basename(url, '.git');
+      return path.join(cloneDir, repoName);
+    });
+  }
+
+  return [];
 }
 
 /**
- * Check if running in single or multi mode.
- * @returns {'single'|'multi'}
+ * Get the mode from config.
+ * @returns {'dir'|'parentDir'|'clone'}
  */
 function getMode() {
-  return loadConfig().mode || 'single';
+  return config.repo.mode;
 }
 
-module.exports = { getRepoDir, getBaseDir, listRepos, getMode, clearCache };
+module.exports = { getRepoDir, getBaseBranch, prepareRepo, listRepos, getMode };

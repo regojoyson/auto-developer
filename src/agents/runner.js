@@ -1,63 +1,50 @@
 /**
  * @module agents/runner
- * @description Spawns Claude Code CLI agent processes.
+ * @description Spawns AI coding CLI agent processes using the configured adapter.
  *
- * Each agent is defined as a Markdown file in `.claude/agents/<name>.md`.
- * This module spawns `claude --agent <name> --print --input <json>` as a
- * child process, captures stdout/stderr, and enforces a configurable timeout.
- *
- * The timeout defaults to 5 minutes (`AGENT_TIMEOUT_MS` env var).
- * On timeout the child is SIGTERM-killed and the promise rejects.
- *
- * In multi-repo setups, pass `options.cwd` to the target repo directory
- * so the agent reads that repo's codebase for context. The repo path is
- * resolved by the `repos/resolver` module from `repos.json`.
- *
- * Environment variables (`GITLAB_PROJECT_ID`, `GITLAB_BASE_URL`, etc.) can
- * be overridden per-invocation via `options.env` — the resolver provides
- * these from the repo config.
+ * The CLI adapter (Claude Code, Codex, Gemini, etc.) is selected via
+ * `providers.json` → `cliAdapter.type`. The adapter handles argument
+ * construction and output parsing — this module handles process lifecycle.
  *
  * @example
  *   const { runAgent } = require('./agents/runner');
- *
- *   // Single repo (uses process.cwd)
- *   await runAgent('orchestrator', '{"issueKey":"PROJ-1"}');
- *
- *   // Multi repo (explicit cwd + env overrides)
- *   await runAgent('orchestrator', '{"issueKey":"FRONT-1"}', {
- *     cwd: '/projects/frontend-app',
- *     env: { GITLAB_PROJECT_ID: '67890' },
- *   });
+ *   const result = await runAgent('orchestrator', '{"issueKey":"PROJ-1"}');
+ *   console.log(result.success, result.output);
  */
 
 const { spawn } = require('child_process');
 const logger = require('../utils/logger');
-
-const DEFAULT_TIMEOUT_MS = parseInt(process.env.AGENT_TIMEOUT_MS || '300000', 10);
+const { getCliAdapter } = require('../providers/cli-adapter');
+const appConfig = require('../config');
 
 /**
- * Invoke a Claude Code agent via the CLI.
+ * Invoke an agent via the configured CLI adapter.
  *
- * @param {string} agentName - Name of the agent (matches .claude/agents/<name>.md)
- * @param {string} input - Text input/prompt to send to the agent
+ * @param {string} agentName - Name of the agent (e.g. 'orchestrator', 'brainstorm')
+ * @param {string} input - JSON string input to pass to the agent
  * @param {object} [options]
  * @param {string} [options.cwd] - Working directory for the agent process (repo root)
  * @param {number} [options.timeoutMs] - Timeout in milliseconds
- * @param {object} [options.env] - Additional env vars to merge (e.g. GITLAB_PROJECT_ID override)
- * @returns {Promise<{exitCode: number, stdout: string, stderr: string}>}
+ * @param {object} [options.env] - Additional env vars to merge
+ * @returns {Promise<{success: boolean, output: string, error: string|null, exitCode: number}>}
  */
 function runAgent(agentName, input, options = {}) {
-  const { cwd = process.cwd(), timeoutMs = DEFAULT_TIMEOUT_MS, env = {} } = options;
+  const { cwd = process.cwd(), timeoutMs, env = {} } = options;
+
+  const adapter = getCliAdapter();
+  const config = adapter.config;
+  const timeout = timeoutMs || config.timeout || appConfig.pipeline.agentTimeout;
+  const command = config.command || adapter.defaultCommand;
+  const args = adapter.buildArgs(agentName, input, config);
+  const childEnv = adapter.buildEnv({ ...process.env, ...env }, config);
 
   return new Promise((resolve, reject) => {
-    const args = ['--agent', agentName, '--print', '--input', input];
+    logger.info(`Invoking agent: ${agentName} via ${adapter.label}`, { command, cwd, timeout });
 
-    logger.info(`Invoking agent: ${agentName}`, { cwd, timeoutMs });
-
-    const child = spawn('claude', args, {
+    const child = spawn(command, args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...env },
+      env: childEnv,
     });
 
     let stdout = '';
@@ -73,21 +60,22 @@ function runAgent(agentName, input, options = {}) {
 
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
-      reject(new Error(`Agent ${agentName} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
+      reject(new Error(`Agent ${agentName} timed out after ${timeout}ms`));
+    }, timeout);
 
     child.on('close', (exitCode) => {
       clearTimeout(timer);
-      logger.info(`Agent ${agentName} exited with code ${exitCode}`);
+      const result = adapter.parseOutput(stdout, stderr, exitCode);
+      logger.info(`Agent ${agentName} exited with code ${exitCode}`, { success: result.success });
       if (stderr) {
         logger.warn(`Agent ${agentName} stderr: ${stderr.slice(0, 500)}`);
       }
-      resolve({ exitCode, stdout, stderr });
+      resolve({ ...result, exitCode });
     });
 
     child.on('error', (err) => {
       clearTimeout(timer);
-      reject(new Error(`Failed to spawn agent ${agentName}: ${err.message}`));
+      reject(new Error(`Failed to spawn agent ${agentName} (${command}): ${err.message}`));
     });
   });
 }

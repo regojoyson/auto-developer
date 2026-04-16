@@ -45,6 +45,7 @@ fi
 
 # ── 2. Remove symlinks ───────────────────────────────────
 
+cd "$DIR"
 source scripts/resolve-repos.sh 2>/dev/null
 
 CLEANED=0
