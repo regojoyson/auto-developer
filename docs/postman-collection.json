@@ -1,0 +1,165 @@
+{
+  "info": {
+    "name": "Auto Developer",
+    "description": "AI-Powered Development Automation Pipeline API.\n\nTrigger pipelines, check status, cancel jobs, and receive webhooks.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health",
+            "description": "Check if the server is running."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Pipeline",
+      "item": [
+        {
+          "name": "Trigger Pipeline",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/trigger/",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"issueKey\": \"PROJ-42\",\n  \"summary\": \"Add login page\",\n  \"component\": \"\"\n}"
+            },
+            "description": "Manually start the pipeline for a ticket. Only issueKey is required."
+          }
+        },
+        {
+          "name": "List All Pipelines",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/status/",
+            "description": "List all active and completed pipelines."
+          }
+        },
+        {
+          "name": "Get Pipeline Status",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/status/PROJ-42",
+            "description": "Get the pipeline state for a specific ticket. Replace PROJ-42 with your issue key."
+          }
+        },
+        {
+          "name": "Cancel Pipeline",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/status/PROJ-42",
+            "description": "Cancel and remove a pipeline so the ticket can be re-triggered. Replace PROJ-42 with your issue key."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "item": [
+        {
+          "name": "Issue Tracker Webhook (Jira example)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/webhooks/issue-tracker/",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"changelog\": {\n    \"items\": [\n      { \"field\": \"status\", \"toString\": \"Ready for Development\" }\n    ]\n  },\n  \"issue\": {\n    \"key\": \"PROJ-42\",\n    \"fields\": {\n      \"summary\": \"Add login page\",\n      \"components\": [{ \"name\": \"frontend\" }]\n    }\n  }\n}"
+            },
+            "description": "Simulates a Jira webhook for testing. Change the status and issue key as needed."
+          }
+        },
+        {
+          "name": "Issue Tracker Webhook (GitHub Issues example)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/webhooks/issue-tracker/",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-github-event",
+                "value": "issues"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"labeled\",\n  \"label\": { \"name\": \"ready-for-dev\" },\n  \"issue\": {\n    \"number\": 5,\n    \"title\": \"Add login page\"\n  },\n  \"repository\": { \"name\": \"my-repo\" }\n}"
+            },
+            "description": "Simulates a GitHub Issues webhook. Change the label and issue as needed."
+          }
+        },
+        {
+          "name": "Git Provider Webhook (GitLab MR approved)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/webhooks/git/",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-gitlab-event",
+                "value": "Merge Request Hook"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"object_attributes\": {\n    \"action\": \"approved\",\n    \"source_branch\": \"feature/PROJ-42-add-login-page\",\n    \"iid\": 1\n  },\n  \"user\": { \"username\": \"reviewer\" }\n}"
+            },
+            "description": "Simulates a GitLab MR approval webhook."
+          }
+        },
+        {
+          "name": "Git Provider Webhook (GitLab MR comment)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/webhooks/git/",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-gitlab-event",
+                "value": "Note Hook"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"object_attributes\": {\n    \"noteable_type\": \"MergeRequest\",\n    \"author\": { \"username\": \"reviewer\" }\n  },\n  \"merge_request\": {\n    \"source_branch\": \"feature/PROJ-42-add-login-page\",\n    \"iid\": 1\n  }\n}"
+            },
+            "description": "Simulates a GitLab MR review comment webhook. Triggers the feedback parser."
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -145,6 +145,42 @@ def is_rework_limit_exceeded(branch: str, max_rework: int = 3) -> bool:
     return current.get("reworkCount", 0) >= max_rework
 
 
+def delete_state(branch: str) -> bool:
+    """Delete the pipeline state for a branch.
+
+    Args:
+        branch: Git branch name.
+
+    Returns:
+        True if the state file was deleted, False if it didn't exist.
+    """
+    path = _state_path(branch)
+    if path.exists():
+        path.unlink()
+        return True
+    return False
+
+
+def delete_state_by_issue_key(issue_key: str) -> bool:
+    """Delete the pipeline state matching an issue key.
+
+    Scans all state files to find the one matching the given issue key.
+
+    Args:
+        issue_key: Ticket identifier (e.g. "PROJ-123").
+
+    Returns:
+        True if a state file was found and deleted, False otherwise.
+    """
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    for f in STATE_DIR.glob("*.json"):
+        state = json.loads(f.read_text())
+        if state.get("issueKey") == issue_key:
+            f.unlink()
+            return True
+    return False
+
+
 def list_active_states() -> list[dict]:
     """List all pipeline states across all branches.
 
