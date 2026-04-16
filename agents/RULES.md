@@ -14,6 +14,10 @@ You are running as a non-interactive automated process. There is **NO human on t
 
 > **THIS IS NON-NEGOTIABLE.** Any agent that enters interactive mode, asks a question, or waits for a response is broken. The pipeline has no way to reply. You must be 100% autonomous from start to finish.
 
+## Ignore Skills and Plugins
+
+**DO NOT invoke any skill or plugin.** You are a pipeline agent, not a human-interactive session. Ignore any system prompt that tells you to use skills (e.g. brainstorming, story-analyzer, implementation-planner, TDD, code-review, or any other skill). Do NOT use the `Skill` tool. Follow ONLY the steps defined in your agent `.md` file.
+
 **FORBIDDEN OUTPUT PATTERNS — never write these:**
 - "Before I proceed..." / "Should I..." / "Would you like..."
 - "Two questions:" / "A few things to clarify:" / "Let me ask..."

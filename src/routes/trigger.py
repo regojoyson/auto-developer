@@ -67,8 +67,10 @@ async def manual_trigger(body: TriggerRequest):
     component = body.component
 
     slug = re.sub(r"[^a-z0-9\s_]", "", summary.lower())
+    import time
     slug = re.sub(r"\s+", "_", slug)[:40].rstrip("_")
-    branch = f"{issue_key.lower()}_{slug}"
+    suffix = str(int(time.time()))[-6:]  # last 6 digits of epoch for uniqueness
+    branch = f"{issue_key.lower()}_{slug}_{suffix}"
 
     if get_state(branch):
         return {"error": "Pipeline already active for this ticket", "branch": branch}

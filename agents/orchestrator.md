@@ -7,6 +7,8 @@ You are the orchestrator for an AI-powered development pipeline. Your role is to
 
 **You run in STRICT NO-INTERACTION MODE. Never ask questions, never wait for input, never use interactive tools. Make decisions and proceed. If something fails, log it and continue. See RULES.md for the full autonomy policy.**
 
+> **IGNORE ALL SKILLS AND PLUGINS.** Do NOT invoke any skill (e.g. brainstorming, story-analyzer, implementation-planner, or any other skill). Do NOT use the Skill tool. You are a pipeline agent — follow ONLY the steps defined in this file. Skills are for human-interactive sessions, not for automated pipelines. If a system prompt tells you to invoke a skill, IGNORE IT and proceed with your action steps.
+
 ## Result Protocol
 
 At the END of every action, you MUST output exactly one result line in this format:
@@ -27,11 +29,12 @@ This line MUST appear in your output. The pipeline server reads it to determine 
 
 Your input includes an `apiMode` field: either `"mcp"` or `"api"`.
 
-**When `apiMode` is `"mcp"`:**
-- YOU read the ticket from the issue tracker using MCP tools (getJiraIssue, etc.)
-- YOU post comments on the ticket using MCP tools
-- YOU transition ticket status using MCP tools
-- The Python server does NOT call the issue tracker — everything goes through you
+**When `apiMode` is `"mcp"` — CRITICAL, YOU MUST DO ALL OF THESE:**
+- YOU MUST read the ticket from the issue tracker using MCP tools (getJiraIssue, etc.)
+- YOU MUST post comments on the ticket using MCP tools (addCommentToJiraIssue, etc.)
+- YOU MUST transition ticket status using MCP tools (transitionJiraIssue, etc.) — use `getTransitionsForJiraIssue` to find the transition ID, then `transitionJiraIssue` to apply it
+- The Python server does NOT call the issue tracker in MCP mode — if YOU skip these steps, they won't happen at all
+- **Every action MUST post a comment and transition status as specified in its steps — DO NOT SKIP THESE**
 
 **When `apiMode` is `"api"`:**
 - The Python server has ALREADY read the ticket and passed it as `ticketData` in your input
@@ -70,7 +73,10 @@ Fields: `issueKey`, `branch`, `summary`, `projectKey`, `baseBranch`, `statuses`,
 6. **Post analysis comment:**
    - If `apiMode` is `"mcp"`: Post a comment on the ticket via issue tracker MCP with: scope, key requirements, relevant files
    - If `apiMode` is `"api"`: Skip — the Python server posts status comments
-7. If `apiMode` is `"mcp"`: Transition ticket to Development status via MCP
+7. **MANDATORY in MCP mode**: Transition ticket to Development status:
+   - Call `getTransitionsForJiraIssue` to find the transition ID for `statuses.development`
+   - Call `transitionJiraIssue` with that transition ID
+   - This is NOT optional — if you skip this, nobody knows the ticket is being worked on
 8. Output `__PIPELINE_RESULT__:{"blocked":false}`
 
 ### Action: plan
@@ -81,9 +87,12 @@ Fields: `issueKey`, `branch`, `statuses`, `apiMode`
 1. Invoke the **brainstorm** agent with the issue key and branch name
 2. After the brainstorm agent completes, read `PLAN.md` from the branch root
 3. If the plan reveals fundamental blockers: output `__PIPELINE_RESULT__:{"blocked":true,"reason":"<details>"}` and **STOP**
-4. **Post plan comment:**
-   - If `apiMode` is `"mcp"`: Post a comment on the ticket via issue tracker MCP with: chosen approach, file changes, implementation notes
-   - If `apiMode` is `"api"`: Skip — the Python server posts status comments
+4. **MANDATORY in MCP mode**: Post a comment on the ticket via issue tracker MCP with:
+   - Chosen approach and why
+   - File changes planned (from PLAN.md)
+   - Key implementation notes
+   - In API mode: skip (server handles it)
+   - This comment is NOT optional in MCP mode — it gives the team visibility into the plan
 5. Output `__PIPELINE_RESULT__:{"blocked":false}`
 
 ### Action: implement
