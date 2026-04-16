@@ -54,6 +54,26 @@ class IssueTrackerBase(ABC):
         """
         ...
 
+    @abstractmethod
+    def transition_issue(self, issue_key: str, status_name: str) -> None:
+        """Transition an issue to a new status.
+
+        Args:
+            issue_key: Issue identifier (e.g. "PROJ-123").
+            status_name: Target status name (e.g. "Development", "Done").
+        """
+        ...
+
+    @abstractmethod
+    def add_comment(self, issue_key: str, body: str) -> None:
+        """Add a comment to an issue.
+
+        Args:
+            issue_key: Issue identifier (e.g. "PROJ-123").
+            body: Comment text body.
+        """
+        ...
+
 
 class GitProviderBase(ABC):
     """Base class for git provider adapters.
