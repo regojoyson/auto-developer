@@ -21,8 +21,11 @@ ok()    { echo -e "${GREEN}[OK]${NC}    $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $1"; }
 fail()  { echo -e "${RED}[FAIL]${NC}  $1"; exit 1; }
 
-# Helper to read config.yaml fields via node
-cfg() { node -e "const y=require('js-yaml'),f=require('fs');const c=y.load(f.readFileSync('config.yaml','utf-8'));console.log($1)"; }
+PY="python3"
+command -v python3.12 &>/dev/null && PY="python3.12"
+
+# Helper to read config.yaml via Python
+cfg() { $PY -c "import yaml; c=yaml.safe_load(open('config.yaml')); print($1)"; }
 
 echo ""
 echo -e "${CYAN}═══════════════════════════════════════════════${NC}"
@@ -34,14 +37,9 @@ echo ""
 
 info "Checking prerequisites..."
 
-if ! command -v node &>/dev/null; then
-  fail "Node.js is not installed. Install Node >= 18."
-fi
-NODE_VERSION=$(node -v | sed 's/v//' | cut -d. -f1)
-[ "$NODE_VERSION" -lt 18 ] && fail "Node.js >= 18 required (found $(node -v))"
-ok "Node.js $(node -v)"
-
-command -v claude &>/dev/null && ok "Claude Code CLI found" || warn "Claude Code CLI not found"
+$PY --version &>/dev/null || fail "Python 3.10+ is not installed."
+PY_VERSION=$($PY -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+ok "Python $PY_VERSION"
 
 # ── 2. Config files ───────────────────────────────────
 
@@ -57,11 +55,11 @@ ok ".env exists"
 
 # ── 3. Read config ────────────────────────────────────
 
-GIT_PROVIDER=$(cfg "c.gitProvider?.type||''")
-ISSUE_TRACKER=$(cfg "c.issueTracker?.type||''")
-CLI_ADAPTER=$(cfg "c.cliAdapter?.type||'claude-code'")
-REPO_MODE=$(cfg "c.repo?.mode||''")
-PORT=$(cfg "c.pipeline?.port||3000")
+GIT_PROVIDER=$(cfg "c.get('gitProvider',{}).get('type','')")
+ISSUE_TRACKER=$(cfg "c.get('issueTracker',{}).get('type','')")
+CLI_ADAPTER=$(cfg "c.get('cliAdapter',{}).get('type','claude-code')")
+REPO_MODE=$(cfg "c.get('repo',{}).get('mode','')")
+PORT=$(cfg "c.get('pipeline',{}).get('port',3000)")
 
 [ -z "$GIT_PROVIDER" ] && fail "config.yaml: gitProvider.type not set"
 [ -z "$ISSUE_TRACKER" ] && fail "config.yaml: issueTracker.type not set"
@@ -74,19 +72,22 @@ ok "Repo mode: $REPO_MODE"
 
 info "Installing dependencies..."
 
-[ ! -d "node_modules" ] && npm install --silent 2>&1 | tail -1 && ok "Root deps installed" || ok "Root deps OK"
-
-if [ -d "mcp-servers/$GIT_PROVIDER" ] && [ ! -d "mcp-servers/$GIT_PROVIDER/node_modules" ]; then
-  (cd "mcp-servers/$GIT_PROVIDER" && npm install --silent 2>&1 | tail -1)
-  ok "$GIT_PROVIDER MCP deps installed"
+if [ -d "venv" ]; then
+  source venv/bin/activate
+  ok "Virtual environment activated"
 else
-  ok "$GIT_PROVIDER MCP deps OK"
+  $PY -m venv venv
+  source venv/bin/activate
+  ok "Virtual environment created"
 fi
+
+pip install -q -r requirements.txt 2>&1 | tail -1
+ok "Python dependencies installed"
 
 # ── 5. Validate secrets ──────────────────────────────
 
 info "Validating secrets..."
-source .env 2>/dev/null || true
+set -a; source .env 2>/dev/null; set +a
 
 if [ "$GIT_PROVIDER" = "gitlab" ]; then
   [ -z "$GITLAB_TOKEN" ] && fail "GITLAB_TOKEN not set in .env"
@@ -102,33 +103,32 @@ fi
 # ── 6. Validate repo ─────────────────────────────────
 
 if [ "$REPO_MODE" = "dir" ]; then
-  REPO_PATH=$(cfg "c.repo?.path||''")
+  REPO_PATH=$(cfg "c.get('repo',{}).get('path','')")
   [ ! -d "$REPO_PATH" ] && fail "Repo dir does not exist: $REPO_PATH"
   ok "Repo: $REPO_PATH"
 elif [ "$REPO_MODE" = "parentDir" ]; then
-  REPO_PATH=$(cfg "c.repo?.path||''")
+  REPO_PATH=$(cfg "c.get('repo',{}).get('path','')")
   [ ! -d "$REPO_PATH" ] && fail "Parent dir does not exist: $REPO_PATH"
-  REPO_COUNT=$(ls -d "$REPO_PATH"/*/ 2>/dev/null | wc -l | tr -d ' ')
-  ok "Repos: $REPO_PATH ($REPO_COUNT found)"
+  ok "Repos: $REPO_PATH"
 elif [ "$REPO_MODE" = "clone" ]; then
-  URL_COUNT=$(cfg "(c.repo?.urls||[]).length")
-  ok "Clone mode: $URL_COUNT URL(s) (will clone on first ticket)"
+  URL_COUNT=$(cfg "len(c.get('repo',{}).get('urls',[]))")
+  ok "Clone mode: $URL_COUNT URL(s)"
 fi
 
 # ── 7. Generate CLI settings ──────────────────────────
 
-info "Generating MCP config for $CLI_ADAPTER..."
+info "Generating MCP config..."
 
-CLI_CONFIG_DIR=$(node src/providers/cli-dirs.js configDir 2>/dev/null || echo ".claude")
+CLI_CONFIG_DIR=$($PY scripts/cli_dirs.py configDir 2>/dev/null || echo ".claude")
 mkdir -p "$CLI_CONFIG_DIR"
 
 if [ "$GIT_PROVIDER" = "gitlab" ]; then
   cat > "$CLI_CONFIG_DIR/settings.json" << 'EOF'
-{"mcpServers":{"git-provider":{"command":"node","args":["mcp-servers/gitlab/index.js"],"env":{"GITLAB_BASE_URL":"${GITLAB_BASE_URL}","GITLAB_TOKEN":"${GITLAB_TOKEN}","GITLAB_PROJECT_ID":"${GITLAB_PROJECT_ID}"}}}}
+{"mcpServers":{"git-provider":{"command":"python3","args":["mcp_servers/gitlab_server.py"],"env":{"GITLAB_BASE_URL":"${GITLAB_BASE_URL}","GITLAB_TOKEN":"${GITLAB_TOKEN}","GITLAB_PROJECT_ID":"${GITLAB_PROJECT_ID}"}}}}
 EOF
 elif [ "$GIT_PROVIDER" = "github" ]; then
   cat > "$CLI_CONFIG_DIR/settings.json" << 'EOF'
-{"mcpServers":{"git-provider":{"command":"node","args":["mcp-servers/github/index.js"],"env":{"GITHUB_TOKEN":"${GITHUB_TOKEN}","GITHUB_OWNER":"${GITHUB_OWNER}","GITHUB_REPO":"${GITHUB_REPO}"}}}}
+{"mcpServers":{"git-provider":{"command":"python3","args":["mcp_servers/github_server.py"],"env":{"GITHUB_TOKEN":"${GITHUB_TOKEN}","GITHUB_OWNER":"${GITHUB_OWNER}","GITHUB_REPO":"${GITHUB_REPO}"}}}}
 EOF
 fi
 ok "MCP config: $GIT_PROVIDER → $CLI_CONFIG_DIR/settings.json"
@@ -136,9 +136,9 @@ ok "MCP config: $GIT_PROVIDER → $CLI_CONFIG_DIR/settings.json"
 # ── 8. Start server ──────────────────────────────────
 
 info "Starting webhook server on port $PORT..."
-node src/webhook/server.js &
+$PY -m uvicorn src.server:app --host 0.0.0.0 --port "$PORT" &
 SERVER_PID=$!
-sleep 1
+sleep 2
 kill -0 $SERVER_PID 2>/dev/null || fail "Server failed to start"
 ok "Server running (PID: $SERVER_PID)"
 
@@ -151,8 +151,8 @@ echo -e "${GREEN}  $ISSUE_TRACKER + $GIT_PROVIDER + $CLI_ADAPTER${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
 echo ""
 echo -e "  Webhook URLs:"
-echo -e "    Issue tracker: ${CYAN}http://<your-host>:${PORT}/webhooks/issue-tracker${NC}"
-echo -e "    Git provider:  ${CYAN}http://<your-host>:${PORT}/webhooks/git${NC}"
+echo -e "    Issue tracker:  ${CYAN}http://<your-host>:${PORT}/webhooks/issue-tracker${NC}"
+echo -e "    Git provider:   ${CYAN}http://<your-host>:${PORT}/webhooks/git${NC}"
 echo -e "    Manual trigger: ${CYAN}http://<your-host>:${PORT}/api/trigger${NC}"
 echo -e "    Status:         ${CYAN}http://<your-host>:${PORT}/api/status${NC}"
 echo ""

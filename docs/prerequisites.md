@@ -10,13 +10,13 @@ Everything you need before running Auto Developer.
 
 ## Required
 
-### 1. Node.js >= 18
+### 1. Python >= 3.10
 
 ```bash
-node --version   # must be v18 or higher
+python3 --version   # must be 3.10 or higher
 ```
 
-Install: https://nodejs.org/
+Install: https://python.org/downloads/ or `brew install python@3.12`
 
 ### 2. AI Coding CLI
 
@@ -130,7 +130,7 @@ For other CLIs (Codex, Gemini), refer to their documentation for MCP server conf
 
 Before running `./setup.sh`:
 
-- [ ] Node.js >= 18 installed
+- [ ] Python >= 3.10 installed
 - [ ] AI coding CLI installed and authenticated (e.g. `claude --version` works)
 - [ ] Git installed
 - [ ] Git provider token ready (GitLab or GitHub)

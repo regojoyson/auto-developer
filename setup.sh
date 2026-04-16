@@ -2,10 +2,8 @@
 # ─────────────────────────────────────────────────────────
 #  Auto-Pilot — Interactive Setup Wizard
 #
-#  Usage:  ./setup.sh
-#
 #  If config.yaml doesn't exist: asks questions and generates it.
-#  Then symlinks .claude/ into the target repo(s).
+#  Then symlinks agent files into the target repo(s).
 # ─────────────────────────────────────────────────────────
 
 set -e
@@ -23,6 +21,9 @@ ok()   { echo -e "  ${GREEN}+${NC} $1"; }
 warn() { echo -e "  ${YELLOW}!${NC} $1"; }
 fail() { echo -e "${RED}[FAIL]${NC}  $1"; exit 1; }
 ask()  { echo -en "  ${CYAN}?${NC} $1"; }
+
+PY="python3"
+command -v python3.12 &>/dev/null && PY="python3.12"
 
 echo ""
 echo -e "${CYAN}═══════════════════════════════════════════════${NC}"
@@ -90,11 +91,10 @@ if [ "$RUN_WIZARD" = true ]; then
       ask "Base branch [main]: "
       read -r BASE_BRANCH
       BASE_BRANCH=${BASE_BRANCH:-main}
-      # Build YAML urls list
       URL_LIST=""
       IFS=',' read -ra URL_ARRAY <<< "$URLS_RAW"
       for url in "${URL_ARRAY[@]}"; do
-        url=$(echo "$url" | xargs)  # trim whitespace
+        url=$(echo "$url" | xargs)
         URL_LIST="${URL_LIST}\n    - ${url}"
       done
       REPO_SECTION="repo:\n  mode: clone\n  urls:${URL_LIST}\n  cloneDir: $CLONE_DIR\n  baseBranch: $BASE_BRANCH"
@@ -109,11 +109,9 @@ if [ "$RUN_WIZARD" = true ]; then
   ask "Issue tracker (jira / github-issues) [jira]: "
   read -r TRACKER
   TRACKER=${TRACKER:-jira}
-
   ask "Trigger status [Ready for Development]: "
   read -r TRIGGER_STATUS
   TRIGGER_STATUS=${TRIGGER_STATUS:-Ready for Development}
-
   ask "Done status [Done]: "
   read -r DONE_STATUS
   DONE_STATUS=${DONE_STATUS:-Done}
@@ -183,10 +181,9 @@ if [ ${#REPO_DIRS[@]} -eq 0 ]; then
   exit 0
 fi
 
-# Get CLI-specific directories (e.g. .claude/agents, .claude)
-CLI_AGENT_DIR=$(node src/providers/cli-dirs.js agentDir 2>/dev/null || echo ".claude/agents")
-CLI_CONFIG_DIR=$(node src/providers/cli-dirs.js configDir 2>/dev/null || echo ".claude")
-CLI_RULES_FILE=$(node src/providers/cli-dirs.js rulesFileName 2>/dev/null || echo "CLAUDE.md")
+CLI_AGENT_DIR=$($PY scripts/cli_dirs.py agentDir 2>/dev/null || echo ".claude/agents")
+CLI_CONFIG_DIR=$($PY scripts/cli_dirs.py configDir 2>/dev/null || echo ".claude")
+CLI_RULES_FILE=$($PY scripts/cli_dirs.py rulesFileName 2>/dev/null || echo "CLAUDE.md")
 
 echo -e "  CLI agent dir: ${CYAN}${CLI_AGENT_DIR}${NC}"
 echo -e "  Linking agent files into repos..."
@@ -202,7 +199,7 @@ for REPO in "${REPO_DIRS[@]}"; do
     continue
   fi
 
-  # 1. Symlink .auto-developer/ as a reference to our project's agents/
+  # 1. Symlink .auto-developer/
   AD_LINK="$REPO/.auto-developer"
   if [ -L "$AD_LINK" ]; then
     ok "$REPO_NAME — .auto-developer/ already linked"
@@ -211,14 +208,14 @@ for REPO in "${REPO_DIRS[@]}"; do
     ok "$REPO_NAME — linked .auto-developer/"
   fi
 
-  # 2. Create CLI agent directory if it doesn't exist
+  # 2. Create CLI agent directory
   mkdir -p "$REPO/$CLI_AGENT_DIR"
 
-  # 3. Symlink each agent .md file (skip CLAUDE.md — handled separately)
+  # 3. Symlink each agent .md file (skip RULES.md)
   for AGENT_FILE in "$AGENTS_SRC"/*.md; do
     [ ! -f "$AGENT_FILE" ] && continue
     AGENT_NAME=$(basename "$AGENT_FILE")
-    [ "$AGENT_NAME" = "CLAUDE.md" ] && continue
+    [ "$AGENT_NAME" = "RULES.md" ] && continue
     TARGET="$REPO/$CLI_AGENT_DIR/$AGENT_NAME"
 
     if [ -L "$TARGET" ]; then
@@ -231,7 +228,7 @@ for REPO in "${REPO_DIRS[@]}"; do
     fi
   done
 
-  # 4. Symlink RULES.md → CLI-specific filename (e.g. CLAUDE.md, AGENTS.md, GEMINI.md)
+  # 4. Symlink RULES.md as CLI-specific filename
   mkdir -p "$REPO/$CLI_CONFIG_DIR"
   RULES_TARGET="$REPO/$CLI_CONFIG_DIR/$CLI_RULES_FILE"
   if [ -L "$RULES_TARGET" ]; then
