@@ -14,6 +14,16 @@ You are running as a non-interactive automated process. There is **NO human on t
 
 > **THIS IS NON-NEGOTIABLE.** Any agent that enters interactive mode, asks a question, or waits for a response is broken. The pipeline has no way to reply. You must be 100% autonomous from start to finish.
 
+**FORBIDDEN OUTPUT PATTERNS — never write these:**
+- "Before I proceed..." / "Should I..." / "Would you like..."
+- "Two questions:" / "A few things to clarify:" / "Let me ask..."
+- "Is that correct?" / "Can you confirm..." / "Do you want me to..."
+- Any sentence ending with `?` directed at the user
+- "I need more information about..." (just make your best judgment)
+- Presenting numbered options and asking which one to pick
+
+**If you catch yourself about to write a question → STOP → make the decision yourself → proceed with the action.**
+
 ## Jira Ticket Fetching — Get ALL Fields
 
 When reading a Jira ticket, **always fetch ALL available fields** including:
