@@ -49,7 +49,11 @@ cd "$DIR"
 source scripts/resolve-repos.sh 2>/dev/null
 
 CLEANED=0
-CLAUDE_DIR="$DIR/.claude"
+AGENTS_SRC="$DIR/.claude/agents"
+
+# Get CLI-specific dirs
+CLI_AGENT_DIR=$(node src/providers/cli-dirs.js agentDir 2>/dev/null || echo ".claude/agents")
+CLI_CONFIG_DIR=$(node src/providers/cli-dirs.js configDir 2>/dev/null || echo ".claude")
 
 if [ ${#REPO_DIRS[@]} -gt 0 ]; then
   echo ""
@@ -57,20 +61,43 @@ if [ ${#REPO_DIRS[@]} -gt 0 ]; then
   echo ""
 
   for REPO in "${REPO_DIRS[@]}"; do
+    [ ! -d "$REPO" ] && continue
     REPO_NAME=$(basename "$REPO")
-    TARGET="$REPO/.claude"
 
-    if [ -L "$TARGET" ]; then
-      CURRENT=$(readlink "$TARGET")
-      if [ "$CURRENT" = "$CLAUDE_DIR" ]; then
-        rm "$TARGET"
-        ok "$REPO_NAME — symlink removed"
+    # Remove .auto-developer symlink
+    AD_LINK="$REPO/.auto-developer"
+    if [ -L "$AD_LINK" ]; then
+      rm "$AD_LINK"
+      ok "$REPO_NAME — .auto-developer/ removed"
+      CLEANED=1
+    fi
+
+    # Remove individual agent file symlinks (only if they point to us)
+    for AGENT_FILE in "$AGENTS_SRC"/*.md; do
+      [ ! -f "$AGENT_FILE" ] && continue
+      AGENT_NAME=$(basename "$AGENT_FILE")
+      TARGET="$REPO/$CLI_AGENT_DIR/$AGENT_NAME"
+
+      if [ -L "$TARGET" ]; then
+        LINK_TARGET=$(readlink "$TARGET")
+        if [ "$LINK_TARGET" = "$AGENT_FILE" ]; then
+          rm "$TARGET"
+          ok "$REPO_NAME — $AGENT_NAME removed"
+          CLEANED=1
+        fi
+      fi
+    done
+
+    # Remove CLAUDE.md symlink (only if it points to us)
+    RULES_TARGET="$REPO/$CLI_CONFIG_DIR/CLAUDE.md"
+    if [ -L "$RULES_TARGET" ]; then
+      LINK_TARGET=$(readlink "$RULES_TARGET")
+      if [ "$LINK_TARGET" = "$DIR/.claude/CLAUDE.md" ]; then
+        rm "$RULES_TARGET"
+        ok "$REPO_NAME — CLAUDE.md removed"
         CLEANED=1
-      else
-        warn "$REPO_NAME — symlink points elsewhere, left alone"
       fi
     fi
-    # Skip non-symlink .claude/ dirs — those aren't ours
   done
 
   [ "$CLEANED" -eq 0 ] && warn "No symlinks to clean up"

@@ -80,22 +80,49 @@ function getBaseBranch() {
 }
 
 /**
- * Prepare a repo for a new ticket — checkout baseBranch and pull latest.
- * Call this before creating a feature branch.
+ * Prepare a repo for a new ticket — stash any uncommitted changes,
+ * checkout baseBranch, reset to origin, and pull latest.
+ *
+ * This ensures a clean state before creating a feature branch, even if
+ * a previous agent run left uncommitted changes or the local branch
+ * diverged from origin.
  *
  * @param {string} repoDir - Absolute path to the repo directory
  */
 function prepareRepo(repoDir) {
   const baseBranch = getBaseBranch();
-  logger.info(`Preparing repo: checkout ${baseBranch} and pull latest`, { repoDir });
-  try {
-    execSync(`git checkout ${baseBranch} && git pull`, {
-      cwd: repoDir,
-      stdio: 'pipe',
-    });
-  } catch (err) {
-    logger.warn(`Failed to prepare repo (may not be a git repo or branch doesn't exist): ${err.message}`);
+  logger.info(`Preparing repo: stash, checkout ${baseBranch}, reset to origin`, { repoDir });
+
+  const run = (cmd) => {
+    try {
+      return execSync(cmd, { cwd: repoDir, stdio: 'pipe' }).toString().trim();
+    } catch (err) {
+      return null;
+    }
+  };
+
+  // 1. Stash any uncommitted changes (so checkout doesn't fail)
+  const stashResult = run('git stash --include-untracked');
+  if (stashResult && !stashResult.includes('No local changes')) {
+    logger.info('Stashed uncommitted changes');
   }
+
+  // 2. Checkout baseBranch
+  if (run(`git checkout ${baseBranch}`) === null) {
+    logger.warn(`Failed to checkout ${baseBranch} — branch may not exist`);
+    return;
+  }
+
+  // 3. Fetch latest from origin
+  run('git fetch origin');
+
+  // 4. Reset local branch to match origin (discard local-only commits)
+  if (run(`git reset --hard origin/${baseBranch}`) === null) {
+    // Fallback: just pull if reset fails (e.g. no remote tracking)
+    run('git pull');
+  }
+
+  logger.info(`Repo ready on ${baseBranch} (synced with origin)`);
 }
 
 /**

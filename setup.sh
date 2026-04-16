@@ -174,7 +174,7 @@ pipeline:
   fi
 fi
 
-# ── Symlink .claude/ into repos ───────────────────────
+# ── Link agent files into repos ───────────────────────
 
 source scripts/resolve-repos.sh 2>/dev/null || fail "Could not read config.yaml"
 
@@ -183,27 +183,62 @@ if [ ${#REPO_DIRS[@]} -eq 0 ]; then
   exit 0
 fi
 
-echo -e "  Linking .claude/ into repos..."
+# Get CLI-specific directories (e.g. .claude/agents, .claude)
+CLI_AGENT_DIR=$(node src/providers/cli-dirs.js agentDir 2>/dev/null || echo ".claude/agents")
+CLI_CONFIG_DIR=$(node src/providers/cli-dirs.js configDir 2>/dev/null || echo ".claude")
+
+echo -e "  CLI agent dir: ${CYAN}${CLI_AGENT_DIR}${NC}"
+echo -e "  Linking agent files into repos..."
 echo ""
+
+AGENTS_SRC="$DIR/.claude/agents"
 
 for REPO in "${REPO_DIRS[@]}"; do
   REPO_NAME=$(basename "$REPO")
-  TARGET="$REPO/.claude"
 
-  if [ -L "$TARGET" ]; then
-    CURRENT=$(readlink "$TARGET")
-    if [ "$CURRENT" = "$CLAUDE_DIR" ]; then
-      ok "$REPO_NAME — already linked"
-    else
-      warn "$REPO_NAME — symlink exists but points elsewhere (skipped)"
-    fi
-  elif [ -d "$TARGET" ]; then
-    warn "$REPO_NAME — .claude/ directory already exists (skipped)"
-  elif [ -d "$REPO" ]; then
-    ln -s "$CLAUDE_DIR" "$TARGET"
-    ok "$REPO_NAME — linked .claude/"
-  else
+  if [ ! -d "$REPO" ]; then
     warn "$REPO_NAME — directory does not exist yet (will link after clone)"
+    continue
+  fi
+
+  # 1. Symlink .auto-developer/ as a reference to our project's .claude/
+  AD_LINK="$REPO/.auto-developer"
+  if [ -L "$AD_LINK" ]; then
+    ok "$REPO_NAME — .auto-developer/ already linked"
+  elif [ ! -d "$AD_LINK" ]; then
+    ln -s "$DIR/.claude" "$AD_LINK"
+    ok "$REPO_NAME — linked .auto-developer/"
+  fi
+
+  # 2. Create CLI agent directory if it doesn't exist
+  mkdir -p "$REPO/$CLI_AGENT_DIR"
+
+  # 3. Symlink each agent .md file individually
+  for AGENT_FILE in "$AGENTS_SRC"/*.md; do
+    [ ! -f "$AGENT_FILE" ] && continue
+    AGENT_NAME=$(basename "$AGENT_FILE")
+    TARGET="$REPO/$CLI_AGENT_DIR/$AGENT_NAME"
+
+    if [ -L "$TARGET" ]; then
+      ok "$REPO_NAME — $AGENT_NAME already linked"
+    elif [ -f "$TARGET" ]; then
+      warn "$REPO_NAME — $AGENT_NAME already exists (skipped)"
+    else
+      ln -s "$AGENT_FILE" "$TARGET"
+      ok "$REPO_NAME — linked $AGENT_NAME"
+    fi
+  done
+
+  # 4. Symlink CLAUDE.md (global rules) into CLI config dir
+  mkdir -p "$REPO/$CLI_CONFIG_DIR"
+  RULES_TARGET="$REPO/$CLI_CONFIG_DIR/CLAUDE.md"
+  if [ -L "$RULES_TARGET" ]; then
+    ok "$REPO_NAME — CLAUDE.md already linked"
+  elif [ -f "$RULES_TARGET" ]; then
+    warn "$REPO_NAME — CLAUDE.md already exists (skipped)"
+  else
+    ln -s "$DIR/.claude/CLAUDE.md" "$RULES_TARGET"
+    ok "$REPO_NAME — linked CLAUDE.md"
   fi
 done
 

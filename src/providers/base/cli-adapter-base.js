@@ -46,6 +46,23 @@ class CliAdapterBase {
   get defaultCommand() { return ''; }
 
   /**
+   * Relative path where this CLI looks for agent definition files.
+   * setup.sh symlinks individual agent .md files into this directory.
+   * @type {string}
+   * @abstract
+   * @example '.claude/agents' for Claude Code, '.codex/agents' for Codex
+   */
+  get agentDir() { return ''; }
+
+  /**
+   * Relative path to this CLI's config directory (for CLAUDE.md / global rules).
+   * @type {string}
+   * @abstract
+   * @example '.claude' for Claude Code, '.codex' for Codex
+   */
+  get configDir() { return ''; }
+
+  /**
    * Build CLI arguments for invoking the agent.
    *
    * @param {string} agentName - Agent name (e.g. 'orchestrator', 'brainstorm')

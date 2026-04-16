@@ -49,11 +49,20 @@ The wizard asks:
 ? Enable notifications? (y/n)
 ```
 
-This generates two files:
+This generates:
 - **`config.yaml`** — all settings (repo, providers, pipeline)
 - **`.env`** — token placeholders
 
+It also symlinks agent files into your target repo(s):
+- Creates `.auto-developer/` symlink (reference to our agent configs)
+- Symlinks each agent `.md` file into the CLI's agent directory (e.g. `.claude/agents/`)
+- Symlinks `CLAUDE.md` into the CLI's config directory
+
+This works even if your repo already has a `.claude/` directory — we only add individual files, never overwrite the whole directory.
+
 If you prefer to write `config.yaml` by hand, see [configuration.md](configuration.md).
+
+If you already have a `config.yaml` and re-run `./setup.sh`, it asks if you want to reconfigure or keep the existing config.
 
 ---
 
