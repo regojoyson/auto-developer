@@ -32,6 +32,7 @@ from installer.choices import (
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.status import Status
 import yaml
 
 from installer.linker import link_agents
@@ -109,6 +110,8 @@ def check_prerequisites():
     console.print("  [cyan]━━━ Pre-flight Check ━━━[/cyan]")
     console.print("  [dim]Checking what tools are available on your system.[/dim]\n")
 
+    with console.status("  Checking tools...", spinner="dots"):
+        import time; time.sleep(0.3)  # brief pause so spinner is visible
     check_prerequisite("Git", "git")
     check_prerequisite("Python 3", "python3")
 
@@ -154,10 +157,12 @@ def ask_repo(total_steps: int, prev: dict | None = None) -> dict:
         path = questionary.path("Repo path:", only_directories=True,
                                 default=p.get("path", ""), style=STYLE).ask()
         if path:
-            resolved = Path(path).expanduser().resolve()
+            with console.status("  Validating directory...", spinner="dots"):
+                resolved = Path(path).expanduser().resolve()
+                is_git = (resolved / ".git").exists() if resolved.exists() else False
             if resolved.exists():
                 success(f"Directory found: {resolved}")
-                if (resolved / ".git").exists():
+                if is_git:
                     success("Git repo detected")
                 else:
                     warn("Not a git repo — agents may not work correctly")
@@ -170,9 +175,12 @@ def ask_repo(total_steps: int, prev: dict | None = None) -> dict:
         path = questionary.path("Parent directory:", only_directories=True,
                                 default=p.get("path", ""), style=STYLE).ask()
         if path:
-            resolved = Path(path).expanduser().resolve()
+            with console.status("  Scanning directories...", spinner="dots"):
+                resolved = Path(path).expanduser().resolve()
+                subdirs = []
+                if resolved.exists():
+                    subdirs = [d.name for d in sorted(resolved.iterdir()) if d.is_dir() and not d.name.startswith(".")]
             if resolved.exists():
-                subdirs = [d.name for d in sorted(resolved.iterdir()) if d.is_dir() and not d.name.startswith(".")]
                 if subdirs:
                     success(f"Found {len(subdirs)} repos: {', '.join(subdirs[:8])}")
                     if len(subdirs) > 8:
@@ -628,9 +636,9 @@ def main():
 
     # Write files
     console.print()
-    info("Writing configuration files...\n")
-    write_config(full_config)
-    write_env(env_vars)
+    with console.status("  Writing configuration files...", spinner="dots"):
+        write_config(full_config)
+        write_env(env_vars)
 
     # Symlink agents
     console.print()
