@@ -54,6 +54,42 @@ class IssueTrackerBase(ABC):
         """
         ...
 
+    @abstractmethod
+    def read_issue(self, issue_key: str) -> dict:
+        """Read full issue details from the tracker.
+
+        Used in API mode so the Python server can read the ticket
+        and pass it to the agent without requiring MCP.
+
+        Args:
+            issue_key: Issue identifier (e.g. "PROJ-123").
+
+        Returns:
+            Dict with keys: summary, description, acceptance_criteria,
+            components, labels, priority, linked_issues, comments, attachments.
+        """
+        ...
+
+    @abstractmethod
+    def transition_issue(self, issue_key: str, status_name: str) -> None:
+        """Transition an issue to a new status.
+
+        Args:
+            issue_key: Issue identifier (e.g. "PROJ-123").
+            status_name: Target status name (e.g. "Development", "Done").
+        """
+        ...
+
+    @abstractmethod
+    def add_comment(self, issue_key: str, body: str) -> None:
+        """Add a comment to an issue.
+
+        Args:
+            issue_key: Issue identifier (e.g. "PROJ-123").
+            body: Comment text body.
+        """
+        ...
+
 
 class GitProviderBase(ABC):
     """Base class for git provider adapters.

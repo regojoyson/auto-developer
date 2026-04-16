@@ -24,7 +24,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import questionary
 from questionary import Style
 from installer.choices import (
-    REPO_MODES, ISSUE_TRACKERS, ISSUE_TRACKER_DEFAULTS,
+    REPO_MODES, ISSUE_TRACKERS, ISSUE_TRACKER_DEFAULTS, ISSUE_TRACKER_ENV,
     GIT_PROVIDERS, GIT_PROVIDER_ENV, GIT_PROVIDER_BOTS,
     CLI_ADAPTERS, NOTIFICATION_PROVIDERS, PIPELINE_DEFAULTS,
     OUTPUT_HANDLERS,
@@ -217,50 +217,97 @@ def ask_repo(total_steps: int, prev: dict | None = None) -> dict:
     return repo
 
 
-def ask_issue_tracker(total_steps: int, prev: dict | None = None) -> dict:
-    """Step 2: Which issue tracker?"""
-    p = (prev or {}).get("issueTracker", {})
-    step(2, total_steps, "Issue Tracker",
-         "Where do your tickets/issues live? The pipeline watches for status changes.")
+def ask_issue_tracker(total_steps: int, prev: dict | None = None, prev_env: dict | None = None) -> tuple:
+    """Step 2: Which issue tracker + integration method?
 
-    info("The pipeline starts when a ticket transitions to the trigger status.")
-    info("For Jira: this is a workflow status (e.g. 'Ready for Development')")
-    info("For GitHub Issues: this is a label name (e.g. 'ready-for-dev')")
+    Returns:
+        Tuple of (tracker_config dict, env_vars dict).
+    """
+    p = (prev or {}).get("issueTracker", {})
+    pe = prev_env or {}
+    step(2, total_steps, "Issue Tracker",
+         "Where do your tickets/issues live? Choose the platform and how the pipeline talks to it.")
+
+    info("Two integration methods:")
+    info("  [bold]CLI MCP[/bold]  — agent reads/writes tickets through MCP tools in your AI CLI")
+    info("  [bold]Built-in API[/bold] — Python server calls the REST API directly (no MCP needed for issue tracking)")
     console.print()
+
+    # Map old config values to new ones for backward compat
+    prev_type = p.get("type", "jira-mcp")
+    if prev_type == "jira":
+        prev_type = "jira-mcp"
+    elif prev_type == "github-issues":
+        prev_type = "github-mcp"
 
     tracker_type = questionary.select(
         "Issue tracker:",
         choices=ISSUE_TRACKERS,
-        default=p.get("type", "jira"),
+        default=prev_type,
         style=STYLE,
     ).ask()
 
     config = {"type": tracker_type}
+    env_vars = {}
     defaults = ISSUE_TRACKER_DEFAULTS[tracker_type]
 
-    if tracker_type == "jira":
-        info("Jira MCP server must be configured in your AI CLI separately.")
-        info("See docs/prerequisites.md for setup instructions.")
-        console.print()
+    is_mcp = tracker_type.endswith("-mcp")
+    is_jira = tracker_type.startswith("jira")
 
+    if is_mcp:
+        console.print()
+        platform = "Jira" if is_jira else "GitHub Issues"
+        info(f"[cyan]{platform} MCP[/cyan] must be configured in your AI CLI separately.")
+        info("See [cyan]docs/prerequisites.md[/cyan] for setup instructions.")
+    else:
+        console.print()
+        info("The Python server will call the REST API directly.")
+        info("API credentials are needed — they'll be saved to [cyan].env[/cyan].")
+        console.print()
+        # Ask for API credentials
+        for var_def in ISSUE_TRACKER_ENV.get(tracker_type, []):
+            prev_val = pe.get(var_def["key"], var_def["default"])
+            if var_def["secret"]:
+                hint = f" (current: {prev_val[:4]}****)" if prev_val else ""
+                value = questionary.password(f"{var_def['label']}{hint}:", style=STYLE).ask()
+                if not value and prev_val:
+                    value = prev_val
+                    info(f"  Keeping existing {var_def['key']}")
+                elif value:
+                    success(f"{var_def['key']} set (masked)")
+                else:
+                    error(f"{var_def['key']} is empty — issue tracker API calls will fail")
+            else:
+                value = questionary.text(f"{var_def['label']}:", default=prev_val, style=STYLE).ask()
+            env_vars[var_def["key"]] = value
+
+    console.print()
     config["triggerStatus"] = questionary.text(
         f"{defaults['trigger_label']} (starts the pipeline):",
         default=p.get("triggerStatus", defaults["trigger_default"]), style=STYLE
     ).ask()
+
+    console.print()
+    info("When the pipeline picks up a ticket, it transitions to this status.")
+    info("This shows the team that AI agents are actively working on it.")
+    config["developmentStatus"] = questionary.text(
+        f"{defaults['development_label']} (while agents are working):",
+        default=p.get("developmentStatus", defaults["development_default"]), style=STYLE
+    ).ask()
+
     config["doneStatus"] = questionary.text(
-        f"{defaults['done_label']} (after merge):",
+        f"{defaults['done_label']} (after MR created):",
         default=p.get("doneStatus", defaults["done_default"]), style=STYLE
     ).ask()
 
     console.print()
     info("When a ticket lacks enough detail to proceed, the pipeline blocks it.")
-    info("Set the status/label the ticket should transition to.")
     config["blockedStatus"] = questionary.text(
         f"{defaults['blocked_label']} (insufficient details):",
         default=p.get("blockedStatus", defaults["blocked_default"]), style=STYLE
     ).ask()
 
-    return config
+    return config, env_vars
 
 
 def ask_git_provider(total_steps: int, prev: dict | None = None, prev_env: dict | None = None) -> tuple[dict, dict]:
@@ -477,8 +524,10 @@ def show_summary(config: dict, env_vars: dict, total_steps: int):
     table.add_row("Base branch", repo.get("baseBranch", "main"))
     table.add_row("", "")
 
-    table.add_row("Issue tracker", config["issueTracker"]["type"])
+    tt = config["issueTracker"]["type"]
+    table.add_row("Issue tracker", f"{tt} ({'agent via MCP' if tt.endswith('-mcp') else 'built-in REST API'})")
     table.add_row("Trigger", config["issueTracker"].get("triggerStatus", ""))
+    table.add_row("Development", config["issueTracker"].get("developmentStatus", ""))
     table.add_row("Done status", config["issueTracker"].get("doneStatus", ""))
     table.add_row("Blocked status", config["issueTracker"].get("blockedStatus", ""))
     table.add_row("", "")
@@ -617,8 +666,9 @@ def main():
 
     # Collect all config — pass prev values as defaults
     repo_config = ask_repo(total_steps, prev)
-    tracker_config = ask_issue_tracker(total_steps, prev)
-    git_config, env_vars = ask_git_provider(total_steps, prev, prev_env)
+    tracker_config, tracker_env = ask_issue_tracker(total_steps, prev, prev_env)
+    git_config, git_env = ask_git_provider(total_steps, prev, prev_env)
+    env_vars = {**tracker_env, **git_env}  # merge all env vars
     cli_config = ask_cli_adapter(total_steps, prev)
     notif_config = ask_notification(total_steps, prev)
     pipeline_config = ask_pipeline(total_steps, prev)
@@ -657,28 +707,96 @@ def main():
     # Done — show next steps
     console.print()
 
-    next_steps = [
-        "[bold]What happens next:[/bold]",
-        "",
-    ]
-
-    # Check what's missing
+    # ─── MCP Servers Panel ────────────────────────────────
+    # Show a dedicated panel FIRST so the user sees what they need to configure
     cmd_map = {"claude-code": "claude", "codex": "codex", "gemini": "gemini"}
     cli_cmd = cmd_map.get(cli_config["type"], "claude")
-    if not shutil.which(cli_cmd):
-        next_steps.append(f"  1. [yellow]Install {cli_config['type']}[/yellow] — the '{cli_cmd}' command is not found yet")
-        next_steps.append(f"  2. Run [cyan]./start.sh[/cyan] to start the pipeline")
-    else:
-        next_steps.append(f"  1. Run [cyan]./start.sh[/cyan] to start the pipeline")
+    git_label = "GitLab" if git_config["type"] == "gitlab" else "GitHub"
+    pr_label = "MRs" if git_config["type"] == "gitlab" else "PRs"
 
-    if tracker_config["type"] == "jira":
-        next_steps.append(f"  {'2' if shutil.which(cli_cmd) else '3'}. Configure Jira MCP in your CLI (see docs/prerequisites.md)")
+    tracker_type = tracker_config["type"]
+    is_tracker_mcp = tracker_type.endswith("-mcp")
+    is_jira = tracker_type.startswith("jira")
+    tracker_platform = "Jira" if is_jira else "GitHub Issues"
+
+    # ─── Integration Table ─────────────────────────────────
+    int_table = Table(
+        title="Integrations for Your Config",
+        show_header=True, header_style="bold cyan",
+        border_style="cyan", expand=True,
+        title_style="bold white",
+        padding=(0, 2),
+    )
+    int_table.add_column("Integration", style="bold", min_width=18)
+    int_table.add_column("Method", justify="center", min_width=12)
+    int_table.add_column("Purpose", min_width=24)
+    int_table.add_column("Action Required", min_width=28)
+
+    # Git provider MCP — always built-in
+    int_table.add_row(
+        f"{git_label} MCP",
+        "[green]Built-in[/green]",
+        f"Branches, commits, {pr_label}",
+        "[dim]Auto-configured by start.sh[/dim]",
+    )
+    int_table.add_row("", "", "", "")  # spacer
+
+    # Issue tracker
+    if is_tracker_mcp:
+        int_table.add_row(
+            f"{tracker_platform} MCP",
+            "[yellow]CLI MCP[/yellow]",
+            "Read tickets, comments, transitions",
+            f"[yellow]Configure in {cli_config['type']} CLI[/yellow]\nSee docs/prerequisites.md",
+        )
+    else:
+        int_table.add_row(
+            f"{tracker_platform} API",
+            "[green]Built-in[/green]",
+            "Read tickets, comments, transitions",
+            "[dim]Credentials saved to .env[/dim]",
+        )
+    int_table.add_row("", "", "", "")  # spacer
+
+    # Slack — only if notifications enabled
+    if notif_config:
+        int_table.add_row(
+            "Slack MCP",
+            "[yellow]CLI MCP[/yellow]",
+            f"Notifications → #{notif_config.get('channel', 'general')}",
+            f"[yellow]Configure in {cli_config['type']} CLI[/yellow]\nSee docs/prerequisites.md",
+        )
+
+    console.print()
+    console.print(Panel(int_table, border_style="cyan"))
+
+    # ─── Next Steps Panel ────────────────────────────────
+    step_num = 1
+    next_steps = []
+
+    if not shutil.which(cli_cmd):
+        next_steps.append(f"  {step_num}. [yellow]Install {cli_config['type']}[/yellow] — '{cli_cmd}' not found")
+        step_num += 1
+
+    # Only show MCP setup steps for MCP-mode integrations
+    if is_tracker_mcp:
+        next_steps.append(f"  {step_num}. Configure [cyan]{tracker_platform} MCP[/cyan] in your CLI  [dim](see table above)[/dim]")
+        step_num += 1
+    if notif_config:
+        next_steps.append(f"  {step_num}. Configure [cyan]Slack MCP[/cyan] in your CLI  [dim](see table above)[/dim]")
+        step_num += 1
+
+    next_steps.append(f"  {step_num}. Run [cyan]./start.sh[/cyan] to start the pipeline")
+    step_num += 1
+
+    # Git MCP note
+    next_steps.append(f"     [dim]{git_label} MCP is built-in and auto-configured by start.sh[/dim]")
 
     next_steps.extend([
         "",
-        f"  Configure webhooks pointing to [cyan]http://<your-host>:{pipeline_config['port']}[/cyan]",
-        f"    Issue tracker:  /webhooks/issue-tracker",
-        f"    Git provider:   /webhooks/git",
+        f"  {step_num}. Configure webhooks:",
+        f"     Issue tracker:  [cyan]http://<your-host>:{pipeline_config['port']}/webhooks/issue-tracker[/cyan]",
+        f"     Git provider:   [cyan]http://<your-host>:{pipeline_config['port']}/webhooks/git[/cyan]",
         "",
         "  Or trigger manually:",
         f"    curl -X POST http://localhost:{pipeline_config['port']}/api/trigger \\",
@@ -688,8 +806,27 @@ def main():
 
     console.print(Panel(
         "\n".join(next_steps),
-        title="[bold green]Setup Complete![/bold green]",
+        title="[bold green]Setup Complete — Next Steps[/bold green]",
         border_style="green",
+    ))
+
+    # ─── Optional Dashboard Panel ────────────────────────
+    dashboard_lines = [
+        "[dim]A web dashboard to monitor pipelines, view logs, and trigger runs.[/dim]",
+        "",
+        "  [cyan]cd dashboard-react[/cyan]",
+        "  [cyan]npm install[/cyan]        [dim]# first time only[/dim]",
+        "  [cyan]npm run dev[/cyan]        [dim]# starts on http://localhost:3001[/dim]",
+        "",
+        f"  [dim]Connects to the API server on port {pipeline_config['port']}.[/dim]",
+        "  [dim]Requires Node.js >= 18. Install: https://nodejs.org[/dim]",
+    ]
+
+    console.print(Panel(
+        "\n".join(dashboard_lines),
+        title="[bold cyan]Optional — Dashboard UI[/bold cyan]",
+        subtitle="[dim]skip this if you prefer CLI / API only[/dim]",
+        border_style="dim cyan",
     ))
     console.print()
 

@@ -23,28 +23,67 @@ REPO_MODES = [
 # ─── Issue Trackers ──────────────────────────────────────
 
 ISSUE_TRACKERS = [
-    questionary.Choice("Jira", value="jira"),
-    questionary.Choice("GitHub Issues", value="github-issues"),
+    questionary.Choice("Jira — via CLI MCP (agent uses Jira MCP tools)", value="jira-mcp"),
+    questionary.Choice("Jira — Built-in REST API (server calls Jira directly)", value="jira-api"),
+    questionary.Choice("GitHub Issues — via CLI MCP (agent uses GitHub MCP tools)", value="github-mcp"),
+    questionary.Choice("GitHub Issues — Built-in REST API (server calls GitHub directly)", value="github-api"),
 ]
 
 # Default values per issue tracker type
 ISSUE_TRACKER_DEFAULTS = {
-    "jira": {
+    "jira-mcp": {
         "trigger_label": "Trigger status",
         "trigger_default": "Ready for Development",
+        "development_label": "Development status",
+        "development_default": "Development",
         "done_label": "Done status",
         "done_default": "Done",
         "blocked_label": "Blocked status",
         "blocked_default": "Blocked",
     },
-    "github-issues": {
+    "jira-api": {
+        "trigger_label": "Trigger status",
+        "trigger_default": "Ready for Development",
+        "development_label": "Development status",
+        "development_default": "Development",
+        "done_label": "Done status",
+        "done_default": "Done",
+        "blocked_label": "Blocked status",
+        "blocked_default": "Blocked",
+    },
+    "github-mcp": {
         "trigger_label": "Trigger label",
         "trigger_default": "ready-for-dev",
+        "development_label": "Development label",
+        "development_default": "in-progress",
         "done_label": "Done label",
         "done_default": "done",
         "blocked_label": "Blocked label",
         "blocked_default": "blocked",
     },
+    "github-api": {
+        "trigger_label": "Trigger label",
+        "trigger_default": "ready-for-dev",
+        "development_label": "Development label",
+        "development_default": "in-progress",
+        "done_label": "Done label",
+        "done_default": "done",
+        "blocked_label": "Blocked label",
+        "blocked_default": "blocked",
+    },
+}
+
+# Environment variables required per issue tracker (only for *-api modes)
+ISSUE_TRACKER_ENV = {
+    "jira-api": [
+        {"key": "JIRA_BASE_URL", "label": "Jira URL", "default": "https://your-org.atlassian.net", "secret": False},
+        {"key": "JIRA_EMAIL", "label": "Jira email", "default": "", "secret": False},
+        {"key": "JIRA_TOKEN", "label": "Jira API token", "default": "", "secret": True},
+    ],
+    "github-api": [
+        {"key": "GITHUB_TOKEN", "label": "GitHub token (Issues scope)", "default": "", "secret": True},
+        {"key": "GITHUB_OWNER", "label": "GitHub owner (org or user)", "default": "", "secret": False},
+    ],
 }
 
 # ─── Git Providers ───────────────────────────────────────

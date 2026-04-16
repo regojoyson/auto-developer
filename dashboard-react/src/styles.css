@@ -45,10 +45,13 @@
 }
 
 .badge-brainstorming { background: #dbeafe; color: #1e40af; }
+.badge-analyzing     { background: #e0f2fe; color: #0369a1; }
+.badge-planning      { background: #dbeafe; color: #1e40af; }
 .badge-developing    { background: #fef3c7; color: #92400e; }
 .badge-awaiting-review { background: #ede9fe; color: #6b21a8; }
 .badge-reworking     { background: #ffedd5; color: #c2410c; }
 .badge-merged        { background: #d1fae5; color: #065f46; }
+.badge-failed        { background: #fee2e2; color: #991b1b; }
 
 /* Live indicator */
 .live-dot {

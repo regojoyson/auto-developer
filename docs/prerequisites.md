@@ -67,14 +67,16 @@ These are included in the `mcp-servers/` directory and configured automatically 
 
 `start.sh` generates `settings.json` in the correct CLI config directory (e.g. `.claude/settings.json`) so the CLI picks them up automatically.
 
-### External MCP servers (you configure in your CLI)
+### External MCP servers (only if using MCP mode)
 
-These MCP servers are **not** included in Auto Developer. You need to configure them in your CLI tool's settings:
+These are **only needed if your `config.yaml` uses `*-mcp` mode** for the issue tracker. If you chose `*-api` mode (built-in REST API), skip the issue tracker MCP — the Python server handles it directly.
 
-| MCP Server | What it does | How to configure |
-|------------|-------------|-----------------|
-| **Jira MCP** (Atlassian) | Read tickets, post comments, transition issues | Configure in your CLI's MCP settings (e.g. `.claude/settings.json`) |
-| **Slack MCP** | Send notifications to channels | Configure in your CLI's MCP settings |
+| MCP Server | Needed when | What it does | How to configure |
+|------------|------------|-------------|-----------------|
+| **Jira MCP** (Atlassian) | `type: jira-mcp` | Read tickets, post comments, transition issues | Configure in your CLI's MCP settings |
+| **Slack MCP** | Notifications enabled | Send notifications to channels | Configure in your CLI's MCP settings |
+
+**Not needed for `jira-api` or `github-api`** — the Python server calls the REST API directly using credentials from `.env`.
 
 #### Configuring Jira MCP in Claude Code
 
@@ -118,7 +120,8 @@ For other CLIs (Codex, Gemini), refer to their documentation for MCP server conf
 
 | Missing MCP | Impact |
 |-------------|--------|
-| Jira MCP | Orchestrator can't read ticket details or post comments. Agents still run but with less context. |
+| Jira MCP (when using `jira-mcp`) | Agent can't read ticket details or post comments. Pipeline fails at analyze phase. |
+| Jira MCP (when using `jira-api`) | **Not needed** — Python server handles Jira via REST API. |
 | Slack MCP | No notifications sent. Pipeline still works, you just won't get Slack messages. |
 | Git MCP (built-in) | Agents can't create branches or commit code. Pipeline fails. This is auto-configured by `start.sh`. |
 
@@ -134,6 +137,8 @@ Before running `./setup.sh`:
 - [ ] AI coding CLI installed and authenticated (e.g. `claude --version` works)
 - [ ] Git installed
 - [ ] Git provider token ready (GitLab or GitHub)
-- [ ] Jira MCP configured in your CLI (if using Jira)
+- [ ] **If using `jira-mcp`:** Jira MCP configured in your CLI
+- [ ] **If using `jira-api`:** Jira API token, email, and base URL ready
+- [ ] **If using `github-api`:** GitHub token and owner ready
 - [ ] Slack MCP configured in your CLI (if using notifications)
 - [ ] Server with public IP or domain (for webhook delivery)

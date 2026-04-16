@@ -13,7 +13,6 @@ Example request::
     {"issueKey": "PROJ-123", "summary": "Add login page", "component": "frontend"}
 """
 
-import json
 import logging
 import re
 import threading
@@ -23,7 +22,7 @@ from pydantic import BaseModel
 
 from src.config import config as app_config
 from src.state.manager import get_state, create_state
-from src.executor.runner import run_agent
+from src.executor.pipeline import run_pipeline_phases
 from src.repos.resolver import get_repo_dir, prepare_repo, get_base_branch
 
 logger = logging.getLogger(__name__)
@@ -43,8 +42,8 @@ class TriggerRequest(BaseModel):
     """
 
     issueKey: str
-    summary: str | None = None
-    component: str | None = None
+    summary: str = None
+    component: str = None
 
 
 @router.post("/")
@@ -52,8 +51,7 @@ async def manual_trigger(body: TriggerRequest):
     """Manually trigger the pipeline for an issue.
 
     Creates a feature branch name from the issue key and summary, initializes
-    pipeline state, and launches the orchestrator agent in a background
-    thread.
+    pipeline state, and launches the pipeline phases in a background thread.
 
     Args:
         body: The trigger request containing the issue key and optional
@@ -68,9 +66,9 @@ async def manual_trigger(body: TriggerRequest):
     summary = body.summary or issue_key
     component = body.component
 
-    slug = re.sub(r"[^a-z0-9\s-]", "", summary.lower())
-    slug = re.sub(r"\s+", "-", slug)[:40].rstrip("-")
-    branch = f"feature/{issue_key}-{slug}"
+    slug = re.sub(r"[^a-z0-9\s_]", "", summary.lower())
+    slug = re.sub(r"\s+", "_", slug)[:40].rstrip("_")
+    branch = f"{issue_key.lower()}_{slug}"
 
     if get_state(branch):
         return {"error": "Pipeline already active for this ticket", "branch": branch}
@@ -83,22 +81,17 @@ async def manual_trigger(body: TriggerRequest):
 
     base_branch = get_base_branch()
     tracker_cfg = app_config["issue_tracker"]
-    input_data = json.dumps({
-        "issueKey": issue_key,
-        "branch": branch,
-        "summary": summary,
-        "projectKey": issue_key.split("-")[0],
-        "baseBranch": base_branch,
-        "statuses": {
-            "trigger": tracker_cfg["trigger_status"],
-            "done": tracker_cfg["done_status"],
-            "blocked": tracker_cfg["blocked_status"],
-        },
-    })
+    statuses = {
+        "trigger": tracker_cfg["trigger_status"],
+        "development": tracker_cfg["development_status"],
+        "done": tracker_cfg["done_status"],
+        "blocked": tracker_cfg["blocked_status"],
+    }
 
     threading.Thread(
-        target=run_agent, args=("orchestrator", input_data),
-        kwargs={"cwd": repo_dir, "issue_key": issue_key}, daemon=True
+        target=run_pipeline_phases,
+        args=(issue_key, branch, summary, issue_key.split("-")[0], base_branch, statuses, repo_dir),
+        daemon=True,
     ).start()
 
     return {"accepted": True, "issueKey": issue_key, "branch": branch, "repoDir": repo_dir}

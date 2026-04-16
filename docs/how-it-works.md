@@ -153,18 +153,22 @@ After 3 rework cycles (configurable), the pipeline stops and sends an escalation
 ## Pipeline States
 
 ```
-brainstorming → developing → awaiting-review → merged
-                                   ↓       ↑
-                                reworking ──┘
+analyzing → planning → developing → awaiting-review → merged
+    |           |          |              ↓       ↑
+    +-----+-----+----------+          reworking ──┘
+          |
+        failed
 ```
 
 | State | What's happening |
 |-------|-----------------|
-| `brainstorming` | Brainstorm agent is writing PLAN.md |
+| `analyzing` | Orchestrator is reading ticket, writing TICKET.md, posting analysis |
+| `planning` | Brainstorm agent is writing PLAN.md, posting plan summary |
 | `developing` | Developer agent is implementing code |
 | `awaiting-review` | PR/MR is open, waiting for human |
 | `reworking` | Developer is applying review feedback |
 | `merged` | PR approved, ticket closed |
+| `failed` | Pipeline encountered an unrecoverable error |
 
 You can check the current state anytime:
 ```bash

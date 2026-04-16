@@ -20,10 +20,10 @@ class MemoryHandler(OutputHandlerBase):
         self._buffers: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
 
     def on_start(self, issue_key, agent_name, cwd):
-        """Initialize the buffer for this agent run."""
-        self._buffers[issue_key][agent_name] = [
-            f"--- Agent {agent_name} started (cwd: {cwd}) ---"
-        ]
+        """Append a subtle start marker (phase markers from pipeline.py provide the main structure)."""
+        self._buffers[issue_key][agent_name].append(
+            f"[agent:{agent_name}] started (cwd: {cwd})"
+        )
 
     def on_output(self, issue_key, agent_name, line, stream):
         """Append a line to the in-memory buffer."""
@@ -32,8 +32,9 @@ class MemoryHandler(OutputHandlerBase):
 
     def on_finish(self, issue_key, agent_name, exit_code):
         """Mark the agent as finished in the buffer."""
+        status = "completed" if exit_code == 0 else f"failed (exit code {exit_code})"
         self._buffers[issue_key][agent_name].append(
-            f"--- Agent {agent_name} finished with exit code {exit_code} ---"
+            f"[agent:{agent_name}] {status}"
         )
 
     def get_output(self, issue_key, agent_name=None):
