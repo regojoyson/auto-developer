@@ -16,5 +16,5 @@ fi
 source venv/bin/activate
 pip install -q -r requirements.txt 2>&1 | tail -1
 
-# Run the TUI wizard
-python3 installer/setup.py "$@"
+# Run the TUI wizard (PYTHONPATH ensures installer/ is importable)
+PYTHONPATH="$DIR" python3 installer/setup.py "$@"

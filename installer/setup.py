@@ -25,6 +25,11 @@ import os
 import sys
 from pathlib import Path
 
+# Ensure project root is on sys.path so 'installer' and 'src' are importable
+PROJECT_ROOT = Path(__file__).parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import questionary
 from questionary import Style
 
@@ -38,9 +43,6 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 import yaml
-
-# Ensure project root is importable
-PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from installer.linker import link_agents
