@@ -53,6 +53,20 @@ if [ ! -f ".env" ]; then
 fi
 ok ".env exists"
 
+# ── 2.5 Activate venv before reading config (needs yaml) ──
+
+if [ -d "venv" ]; then
+  source venv/bin/activate
+  PY="python3"
+  # Ensure yaml is installed (first-run safety)
+  python3 -c "import yaml" 2>/dev/null || pip install -q pyyaml
+else
+  $PY -m venv venv
+  source venv/bin/activate
+  PY="python3"
+  pip install -q pyyaml
+fi
+
 # ── 3. Read config ────────────────────────────────────
 
 GIT_PROVIDER=$(cfg "c.get('gitProvider',{}).get('type','')")
@@ -71,18 +85,8 @@ ok "Repo mode: $REPO_MODE"
 # ── 4. Install dependencies ──────────────────────────
 
 info "Installing dependencies..."
-
-if [ -d "venv" ]; then
-  source venv/bin/activate
-  ok "Virtual environment activated"
-else
-  $PY -m venv venv
-  source venv/bin/activate
-  ok "Virtual environment created"
-fi
-
 pip install -q -r requirements.txt 2>&1 | tail -1
-ok "Python dependencies installed"
+ok "Python dependencies installed (venv: $(which python3))"
 
 # ── 5. Validate secrets ──────────────────────────────
 
