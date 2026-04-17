@@ -12,7 +12,6 @@ types:
 Mount this router under ``/webhooks/git`` in the FastAPI app.
 """
 
-import json
 import logging
 import threading
 
@@ -20,8 +19,7 @@ from fastapi import APIRouter, Request
 
 from src.config import config
 from src.state.manager import get_state, transition_state, is_rework_limit_exceeded, list_active_states
-from src.executor.runner import run_agent
-from src.executor.pipeline import run_rework_phases
+from src.executor.pipeline import run_rework_phases, try_add_comment, try_notify_slack
 from src.providers.git_provider import get_git_provider
 
 logger = logging.getLogger(__name__)
@@ -76,18 +74,8 @@ async def handle_webhook(request: Request):
             return {"received": True}
         logger.info(f"PR approved for {state['issueKey']} ({branch})")
         transition_state(branch, "merged")
-        statuses = _get_statuses()
-
-        def _run_merge():
-            run_agent("orchestrator", json.dumps({
-                "action": "merge-approved",
-                "issueKey": state["issueKey"],
-                "branch": branch,
-                "prId": pr_id,
-                "statuses": statuses,
-            }), cwd=state.get("repoPath", "."), issue_key=state["issueKey"])
-
-        threading.Thread(target=_run_merge, daemon=True).start()
+        try_add_comment(state["issueKey"], f"{state['issueKey']} merged successfully")
+        try_notify_slack(f"{state['issueKey']} merged")
 
     elif event == "push":
         state = get_state(branch)
@@ -110,18 +98,11 @@ async def handle_webhook(request: Request):
         max_rework = config["pipeline"]["max_rework_iterations"]
         if is_rework_limit_exceeded(resolved_branch, max_rework):
             logger.warning(f"Rework limit exceeded for {state['issueKey']}")
-            statuses = _get_statuses()
-
-            def _run_escalation():
-                run_agent("orchestrator", json.dumps({
-                    "action": "rework-limit-exceeded",
-                    "issueKey": state["issueKey"],
-                    "branch": resolved_branch,
-                    "reworkCount": state.get("reworkCount", 0),
-                    "statuses": statuses,
-                }), cwd=state.get("repoPath", "."), issue_key=state["issueKey"])
-
-            threading.Thread(target=_run_escalation, daemon=True).start()
+            try_add_comment(
+                state["issueKey"],
+                f"{state['issueKey']} has exceeded the rework limit ({state.get('reworkCount', 0)} iterations) — human intervention needed",
+            )
+            try_notify_slack(f"{state['issueKey']} escalation: rework limit exceeded")
             return {"received": True}
 
         logger.info(f"Review comment for {state['issueKey']}, starting rework pipeline")

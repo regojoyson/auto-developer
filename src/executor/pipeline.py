@@ -214,6 +214,12 @@ def _try_notify_slack(message):
         logger.warning(f"Failed to send Slack notification: {e}")
 
 
+# Public alias so webhook routes can post best-effort ticket comments
+# without importing a private helper.
+try_add_comment = _try_add_comment
+try_notify_slack = _try_notify_slack
+
+
 # ─── Error Handlers ─────────────────────────────────────
 
 def _handle_agent_failure(issue_key, branch, agent_name, result, statuses):
