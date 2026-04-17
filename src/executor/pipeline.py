@@ -677,11 +677,20 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
                 picker_ticket = {"summary": summary, "description": ""}
         picker_ticket_data = picker_ticket  # reused below
 
+        # Truncate description + AC heavily so the model picks a repo from
+        # the ticket headline instead of getting invested in "solving" the
+        # issue (it would otherwise waste its turn budget exploring code).
+        _desc = (picker_ticket.get("description") or "")[:400]
+        _ac_raw = picker_ticket.get("acceptance_criteria") or []
+        if isinstance(_ac_raw, list):
+            _ac = [str(a)[:150] for a in _ac_raw[:3]]
+        else:
+            _ac = [str(_ac_raw)[:400]]
         picker_input = json.dumps({
             "issueKey": issue_key,
             "summary": picker_ticket.get("summary", summary),
-            "description": picker_ticket.get("description", ""),
-            "acceptanceCriteria": picker_ticket.get("acceptance_criteria", []),
+            "description": _desc,
+            "acceptanceCriteria": _ac,
             "parentDir": str(parent),
             "candidates": candidates,
         })
