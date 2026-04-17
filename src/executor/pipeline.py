@@ -22,6 +22,7 @@ from src.state.manager import (
     transition_state,
     record_phase_start,
     record_phase_end,
+    find_state_by_issue_key,
 )
 from src.config import config as app_config
 from src.providers.issue_tracker import get_issue_tracker, is_api_mode
@@ -257,13 +258,32 @@ def _handle_agent_failure(issue_key, branch, agent_name, result, statuses):
     _try_notify_slack(f"{issue_key} pipeline failed during {PHASE_NAMES.get(agent_name, agent_name)} — check logs")
 
 
-def _handle_blocked(issue_key, branch, statuses, result):
-    """Handle an agent reporting the ticket is blocked."""
+def _handle_blocked(issue_key, branch, statuses, result, phase_label="phase:analyze"):
+    """Handle an agent reporting the ticket is blocked.
+
+    Transitions the pipeline state machine to "blocked" so a Jira comment
+    webhook can later resume from planning. Posts a Jira comment with the
+    blocker reason and sets the Jira ticket status to the configured
+    blockedStatus.
+    """
     reason = _extract_blocked_reason(result)
-    _log_phase(issue_key, "phase:analyze", f"BLOCKED — {reason}")
+    _log_phase(issue_key, phase_label, f"BLOCKED — {reason}")
+
+    # Record blocked state so the comment-webhook can resume later.
+    try:
+        current = get_state(branch)
+        if current and current["state"] in ("analyzing", "planning"):
+            transition_state(branch, "blocked", error={
+                "phase": current["state"],
+                "agent": phase_label,
+                "message": reason,
+            })
+    except Exception as e:
+        logger.warning(f"Failed to record blocked state for {branch}: {e}")
 
     _try_add_comment(issue_key,
-        f"Pipeline blocked — additional information needed:\n\n{reason}")
+        f"Pipeline blocked — additional information needed:\n\n{reason}\n\n"
+        f"_Reply to this ticket with the missing details and the pipeline will resume._")
     _try_transition_issue(issue_key, statuses["blocked"])
     _try_notify_slack(f"{issue_key} blocked — {reason}")
 
@@ -358,39 +378,52 @@ def _run_repo_phase(
 
 # ─── Per-Repo Pipeline ──────────────────────────────────
 
-def _run_pipeline_for_repo(
+def _read_repo_file(repo_dir: str, file_path: str) -> str | None:
+    """Read a file the agent wrote to the repo working dir, if present."""
+    from pathlib import Path as _P
+    full = _P(repo_dir) / file_path
+    if not full.exists():
+        return None
+    try:
+        return full.read_text(encoding="utf-8")
+    except Exception:
+        return None
+
+
+def _comment_with_prefix(issue_key: str, repo_name: str, multi_repo: bool,
+                        title: str, body: str) -> None:
+    """Post a Jira comment for a phase output, scoped to a repo when in multi-repo."""
+    if not body:
+        return
+    header = f"**{title} — {repo_name}**" if multi_repo else f"**{title}**"
+    _try_add_comment(issue_key, f"{header}\n\n{body}")
+
+
+def _run_analyze_for_repo(
     issue_key, branch, base_branch, summary, statuses,
     repo_name, repo_dir, ticket_data, api_mode,
 ) -> dict:
-    """Run analyze → plan → implement → push → create MR for ONE repo.
+    """Phase 1 for one repo: prepare base, run analyze, return TICKET.md content.
 
-    Updates per-repo sub-state in the shared state record via
-    ``update_repo_sub_state``. Catches per-repo failures and returns a
-    summary dict (does NOT transition the overall pipeline to "failed").
+    Runs with the local repo checked out to the base branch — no remote
+    branch is created yet. The ticket-status transition to Development
+    happens in the orchestrator, AFTER analyses succeed and summaries are
+    posted to Jira.
 
     Returns:
         Dict with keys:
-            success: bool — all three phases + push + MR creation succeeded
-            prId: int | None
-            mrUrl: str | None
+            success: bool
+            blocked: bool — True if the agent reported blocked=true
+            blocked_reason: str | None
+            ticket_md: str | None — contents of TICKET.md the agent wrote
             error: str | None
     """
     from src.state.manager import update_repo_sub_state
-    import os as _os
 
     try:
-        # Prepare repo on base branch (fresh checkout)
         update_repo_sub_state(branch, repo_name, "preparing")
         _prepare_repo_for_branch(repo_dir, base_branch)
 
-        # Build git-provider API client scoped to THIS repo
-        git_adapter, _ = get_git_provider()
-        git_api = git_adapter.create_api(dict(_os.environ), repo_dir=repo_dir)
-
-        # Create the remote branch for this repo
-        create_remote_branch(git_api, branch=branch, base=base_branch)
-
-        # ── Phase 1 — Analyze ───────────────────────────
         update_repo_sub_state(branch, repo_name, "analyzing")
         analyze_payload = {
             "issueKey": issue_key,
@@ -399,24 +432,86 @@ def _run_pipeline_for_repo(
             "baseBranch": base_branch,
             "statuses": statuses,
             "apiMode": api_mode,
-            "repo": repo_name,  # hint to the agent that this is one of N
+            "repo": repo_name,
         }
         if ticket_data:
             analyze_payload["ticketData"] = ticket_data
-        result = _run_repo_phase(
-            issue_key, branch, "analyze",
-            f"phase:{repo_name}:analyze",
-            json.dumps(analyze_payload), statuses, repo_dir,
-            phase_scope=ANALYZE_SCOPE,
-        )
-        if result is None:
-            raise RuntimeError("analyze phase failed or blocked")
 
-        commit_local_file_via_api(
-            git_api, repo_dir=repo_dir, branch=branch,
-            file_path="TICKET.md",
-            message=f"docs({issue_key}): add ticket context",
-        )
+        phase_label = f"phase:{repo_name}:analyze"
+        _log_phase(issue_key, phase_label, "Starting...")
+        try:
+            result = run_agent(
+                "analyze", json.dumps(analyze_payload),
+                cwd=repo_dir, issue_key=issue_key,
+                phase_scope=ANALYZE_SCOPE,
+            )
+        except Exception as e:
+            _log_phase(issue_key, phase_label, f"EXCEPTION — {e}")
+            update_repo_sub_state(branch, repo_name, "failed", error=str(e))
+            return {"success": False, "blocked": False, "blocked_reason": None,
+                    "ticket_md": None, "error": str(e)}
+
+        if not result.get("success"):
+            err = result.get("error") or f"exit {result.get('exit_code')}"
+            _log_phase(issue_key, phase_label, f"FAILED — {err}")
+            update_repo_sub_state(branch, repo_name, "failed", error=err)
+            return {"success": False, "blocked": False, "blocked_reason": None,
+                    "ticket_md": None, "error": err}
+
+        if _is_blocked(result):
+            reason = _extract_blocked_reason(result)
+            _log_phase(issue_key, phase_label, f"BLOCKED — {reason}")
+            return {"success": False, "blocked": True, "blocked_reason": reason,
+                    "ticket_md": None, "error": None}
+
+        _log_phase(issue_key, phase_label, "Completed successfully")
+        ticket_md = _read_repo_file(repo_dir, "TICKET.md")
+        return {"success": True, "blocked": False, "blocked_reason": None,
+                "ticket_md": ticket_md, "error": None}
+
+    except Exception as e:
+        err = str(e)
+        _log_step(issue_key, f"[{repo_name}] analyze failed: {err}")
+        update_repo_sub_state(branch, repo_name, "failed", error=err)
+        return {"success": False, "blocked": False, "blocked_reason": None,
+                "ticket_md": None, "error": err}
+
+
+def _run_impl_for_repo(
+    issue_key, branch, base_branch, summary, statuses,
+    repo_name, repo_dir, api_mode, multi_repo,
+) -> dict:
+    """Phases 2+3 for one repo: create branch, plan, post PLAN comment,
+    implement, push, create MR.
+
+    Assumes analyze already ran and wrote TICKET.md to the working dir.
+    Commits TICKET.md to the freshly-created feature branch before
+    running plan.
+
+    Returns:
+        Dict with keys:
+            success: bool
+            blocked: bool
+            blocked_reason: str | None
+            prId: int | None
+            mrUrl: str | None
+            error: str | None
+    """
+    from src.state.manager import update_repo_sub_state
+    import os as _os
+
+    try:
+        git_adapter, _ = get_git_provider()
+        git_api = git_adapter.create_api(dict(_os.environ), repo_dir=repo_dir)
+
+        # Create the remote branch now (after analyze) and commit TICKET.md.
+        create_remote_branch(git_api, branch=branch, base=base_branch)
+        if _read_repo_file(repo_dir, "TICKET.md"):
+            commit_local_file_via_api(
+                git_api, repo_dir=repo_dir, branch=branch,
+                file_path="TICKET.md",
+                message=f"docs({issue_key}): add ticket context",
+            )
 
         # ── Phase 2 — Plan ──────────────────────────────
         update_repo_sub_state(branch, repo_name, "planning")
@@ -425,20 +520,45 @@ def _run_pipeline_for_repo(
             "branch": branch,
             "repo": repo_name,
         })
-        result = _run_repo_phase(
-            issue_key, branch, "plan",
-            f"phase:{repo_name}:plan",
-            plan_input, statuses, repo_dir,
-            phase_scope=PLAN_SCOPE,
-        )
-        if result is None:
-            raise RuntimeError("plan phase failed or blocked")
+        phase_label = f"phase:{repo_name}:plan"
+        _log_phase(issue_key, phase_label, "Starting...")
+        try:
+            result = run_agent(
+                "plan", plan_input,
+                cwd=repo_dir, issue_key=issue_key,
+                phase_scope=PLAN_SCOPE,
+            )
+        except Exception as e:
+            _log_phase(issue_key, phase_label, f"EXCEPTION — {e}")
+            update_repo_sub_state(branch, repo_name, "failed", error=str(e))
+            return {"success": False, "blocked": False, "blocked_reason": None,
+                    "prId": None, "mrUrl": None, "error": str(e)}
 
-        commit_local_file_via_api(
-            git_api, repo_dir=repo_dir, branch=branch,
-            file_path="PLAN.md",
-            message=f"docs({issue_key}): add implementation plan",
-        )
+        if not result.get("success"):
+            err = result.get("error") or f"exit {result.get('exit_code')}"
+            _log_phase(issue_key, phase_label, f"FAILED — {err}")
+            update_repo_sub_state(branch, repo_name, "failed", error=err)
+            return {"success": False, "blocked": False, "blocked_reason": None,
+                    "prId": None, "mrUrl": None, "error": err}
+
+        if _is_blocked(result):
+            reason = _extract_blocked_reason(result)
+            _log_phase(issue_key, phase_label, f"BLOCKED — {reason}")
+            return {"success": False, "blocked": True, "blocked_reason": reason,
+                    "prId": None, "mrUrl": None, "error": None}
+
+        _log_phase(issue_key, phase_label, "Completed successfully")
+
+        # Post PLAN.md to Jira before committing it to the branch.
+        plan_md = _read_repo_file(repo_dir, "PLAN.md")
+        if plan_md:
+            _comment_with_prefix(issue_key, repo_name, multi_repo,
+                                 "Implementation Plan", plan_md)
+            commit_local_file_via_api(
+                git_api, repo_dir=repo_dir, branch=branch,
+                file_path="PLAN.md",
+                message=f"docs({issue_key}): add implementation plan",
+            )
 
         # ── Phase 3 — Implement ─────────────────────────
         update_repo_sub_state(branch, repo_name, "developing")
@@ -477,13 +597,15 @@ def _run_pipeline_for_repo(
             prId=pr_id, mrUrl=mr_url,
         )
         _log_step(issue_key, f"[{repo_name}] MR created: {mr_url}")
-        return {"success": True, "prId": pr_id, "mrUrl": mr_url, "error": None}
+        return {"success": True, "blocked": False, "blocked_reason": None,
+                "prId": pr_id, "mrUrl": mr_url, "error": None}
 
     except Exception as e:
         err = str(e)
         _log_step(issue_key, f"[{repo_name}] failed: {err}")
         update_repo_sub_state(branch, repo_name, "failed", error=err)
-        return {"success": False, "prId": None, "mrUrl": None, "error": err}
+        return {"success": False, "blocked": False, "blocked_reason": None,
+                "prId": None, "mrUrl": None, "error": err}
 
 
 # ─── Main Pipeline ──────────────────────────────────────
@@ -620,49 +742,84 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
             logger.warning(f"{issue_key}: could not read ticket — {e}")
             ticket_data = None
 
-    # ── Transition ticket to Development (once) ─────────
-    if is_api_mode():
-        _log_step(issue_key, f"Transitioning ticket to '{statuses['development']}' (via REST API)...")
-        try:
-            adapter, _ = get_issue_tracker()
-            adapter.transition_issue(issue_key, statuses["development"])
-            _log_step(issue_key, f"Ticket transitioned to '{statuses['development']}' successfully")
-        except Exception as e:
-            error_msg = str(e)
-            _log_step(issue_key, f"CRITICAL: Failed to transition ticket — {error_msg}")
-            logger.error(f"{issue_key}: Cannot transition to '{statuses['development']}': {error_msg}")
-            transition_state(branch, "failed", error={
-                "phase": "analyzing",
-                "agent": "pipeline",
-                "message": f"Failed to transition ticket to '{statuses['development']}': {error_msg}",
-            })
-            _try_notify_slack(f"{issue_key} pipeline failed — could not transition ticket")
-            return
-    else:
-        _log_step(issue_key, "Ticket transition will be handled by agent via MCP")
-
-    # ── Fan out: one full pipeline per chosen repo ──────
+    # ── Fan-out setup ───────────────────────────────────
     api_mode = app_config["issue_tracker"]["api_mode"]
     current_state = get_state(branch)
     repos = (current_state.get("repos") if current_state else None) or []
+    multi_repo = len(repos) > 1
     _log_step(issue_key, f"Fanning out across {len(repos)} repo(s): {[r['name'] for r in repos]}")
 
-    # Branch-level state is coarse — flip it ONCE at the start of the fan-out.
-    # Per-repo granular state lives in state.repos[i].state.
+    # ── Pass 1 — Analyze each repo on the base branch ───
+    # Runs BEFORE the ticket is moved to Development, so analysis happens
+    # in the calm state and its summary lands in Jira before anyone sees
+    # the ticket flip to "in progress".
+    analyze_results = []
+    for repo_entry in repos:
+        a = _run_analyze_for_repo(
+            issue_key, branch, base_branch, summary, statuses,
+            repo_entry["name"], repo_entry["path"], ticket_data, api_mode,
+        )
+        analyze_results.append((repo_entry, a))
+
+    blocked_any = next(((re, a) for re, a in analyze_results if a["blocked"]), None)
+    if blocked_any:
+        re, a = blocked_any
+        reason = a["blocked_reason"] or "unclear requirements"
+        fake_result = {"output": f"{RESULT_MARKER}" + json.dumps({
+            "blocked": True,
+            "reason": f"[{re['name']}] {reason}" if multi_repo else reason,
+        })}
+        _handle_blocked(issue_key, branch, statuses, fake_result, phase_label="phase:analyze")
+        return
+
+    failed = [(re, a) for re, a in analyze_results if not a["success"]]
+    if failed:
+        re, a = failed[0]
+        err = a["error"] or "analyze failed"
+        _handle_agent_failure(issue_key, branch, "phase:analyze",
+                              {"success": False, "error": f"[{re['name']}] {err}"},
+                              statuses)
+        return
+
+    # ── Post analyze summaries to Jira ──────────────────
+    for re, a in analyze_results:
+        if a["ticket_md"]:
+            _comment_with_prefix(issue_key, re["name"], multi_repo,
+                                 "Analysis", a["ticket_md"])
+
+    # ── Transition Jira ticket to Development ───────────
+    _log_step(issue_key, f"Transitioning ticket to '{statuses['development']}' (via REST API)...")
+    try:
+        adapter, _ = get_issue_tracker()
+        adapter.transition_issue(issue_key, statuses["development"])
+        _log_step(issue_key, f"Ticket transitioned to '{statuses['development']}' successfully")
+    except Exception as e:
+        error_msg = str(e)
+        _log_step(issue_key, f"CRITICAL: Failed to transition ticket — {error_msg}")
+        logger.error(f"{issue_key}: Cannot transition to '{statuses['development']}': {error_msg}")
+        transition_state(branch, "failed", error={
+            "phase": "analyzing", "agent": "pipeline",
+            "message": f"Failed to transition ticket to '{statuses['development']}': {error_msg}",
+        })
+        _try_notify_slack(f"{issue_key} pipeline failed — could not transition ticket")
+        return
+
+    # ── Advance branch-level state: analyzing → planning → developing ─
+    current_state = get_state(branch)
     if current_state and current_state.get("state") == "analyzing":
         transition_state(branch, "planning")
         transition_state(branch, "developing")
 
-    results = []
-    for repo_entry in repos:
-        repo_name = repo_entry["name"]
-        repo_dir_i = repo_entry["path"]
+    # ── Pass 2 — Create branch + plan + implement + MR per repo ─
+    results = _run_impl_fan_out(
+        issue_key, branch, base_branch, summary, statuses,
+        repos, api_mode, multi_repo,
+    )
 
-        result = _run_pipeline_for_repo(
-            issue_key, branch, base_branch, summary, statuses,
-            repo_name, repo_dir_i, ticket_data, api_mode,
-        )
-        results.append({"name": repo_name, **result})
+    # If any repo blocked during plan, the pipeline is already in "blocked"
+    # state — don't post completion summary.
+    if any(r.get("blocked") for r in results):
+        return
 
     # ── Summary comment + final transitions ─────────────
     ok_repos = [r for r in results if r["success"]]
@@ -693,6 +850,134 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
             "phase": "developing", "agent": "pipeline",
             "message": error_summary,
         })
+
+
+def _run_impl_fan_out(issue_key, branch, base_branch, summary, statuses,
+                      repos, api_mode, multi_repo):
+    """Run the plan+implement+MR pass across all repos.
+
+    Short-circuits on block: if any repo reports blocked during plan, the
+    pipeline transitions to the blocked state and stops further repos.
+    """
+    results = []
+    for repo_entry in repos:
+        r = _run_impl_for_repo(
+            issue_key, branch, base_branch, summary, statuses,
+            repo_entry["name"], repo_entry["path"], api_mode, multi_repo,
+        )
+        results.append({"name": repo_entry["name"], **r})
+        if r.get("blocked"):
+            reason = r["blocked_reason"] or "unclear requirements"
+            fake_result = {"output": f"{RESULT_MARKER}" + json.dumps({
+                "blocked": True,
+                "reason": f"[{repo_entry['name']}] {reason}" if multi_repo else reason,
+            })}
+            _handle_blocked(issue_key, branch, statuses, fake_result,
+                            phase_label="phase:plan")
+            break
+    return results
+
+
+# ─── Resume from Blocked ───────────────────────────────
+
+def resume_from_blocked(issue_key: str, comment_body: str) -> bool:
+    """Resume a blocked pipeline after the human replied with more detail.
+
+    Looks up the existing pipeline state by issue key. Only resumes if the
+    pipeline is currently in the "blocked" state. Re-runs the plan +
+    implement + MR pass for every repo the picker originally chose —
+    analyze is NOT re-run, since the ticket summary/analysis is already
+    captured in the earlier Jira comment.
+
+    Args:
+        issue_key: Ticket identifier (e.g. "EV-14945").
+        comment_body: The new Jira comment that triggered the resume
+            (forwarded to the plan agent as additional context).
+
+    Returns:
+        True if the pipeline was resumed, False if the ticket wasn't in a
+        resumable state.
+    """
+    state = find_state_by_issue_key(issue_key)
+    if not state:
+        logger.info(f"{issue_key}: no pipeline state — ignoring comment")
+        return False
+    if state.get("state") != "blocked":
+        logger.info(f"{issue_key}: state is '{state.get('state')}' — not resuming")
+        return False
+
+    branch = state["branch"]
+    repos = state.get("repos") or []
+    if not repos:
+        logger.warning(f"{issue_key}: blocked state has no repos — cannot resume")
+        return False
+
+    base_branch = get_base_branch()
+    tracker_cfg = app_config["issue_tracker"]
+    statuses = {
+        "trigger": tracker_cfg["trigger_status"],
+        "development": tracker_cfg["development_status"],
+        "done": tracker_cfg["done_status"],
+        "blocked": tracker_cfg["blocked_status"],
+    }
+
+    logger.info(f"\n{'='*60}")
+    logger.info(f"  RESUMING FROM BLOCKED: {issue_key}")
+    logger.info(f"  Branch: {branch}")
+    logger.info(f"  Trigger comment: {comment_body[:120]}")
+    logger.info(f"{'='*60}\n")
+
+    _try_add_comment(issue_key, "Reply received — resuming pipeline from planning.")
+    # blocked → planning
+    transition_state(branch, "planning")
+    # Move Jira status back to Development while we work.
+    _try_transition_issue(issue_key, statuses["development"])
+    transition_state(branch, "developing")
+
+    # Ticket summary (only for logging/MR title)
+    summary = state.get("summary") or issue_key
+    multi_repo = len(repos) > 1
+    api_mode = app_config["issue_tracker"]["api_mode"]
+
+    results = _run_impl_fan_out(
+        issue_key, branch, base_branch, summary, statuses,
+        repos, api_mode, multi_repo,
+    )
+
+    # If blocked again during plan, _run_impl_fan_out already handled it.
+    if any(r.get("blocked") for r in results):
+        return True
+
+    # Same post-implementation flow as the normal run.
+    ok_repos = [r for r in results if r["success"]]
+    err_repos = [r for r in results if not r["success"]]
+
+    if ok_repos:
+        lines = [f"Implementation complete for {issue_key}.", ""]
+        for r in ok_repos:
+            lines.append(f"- **{r['name']}**: {r['mrUrl']}")
+        if err_repos:
+            lines.append("")
+            lines.append("Failed:")
+            for r in err_repos:
+                lines.append(f"- **{r['name']}**: {r['error']}")
+        _try_add_comment(issue_key, "\n".join(lines))
+        _try_notify_slack(
+            f"MRs created for {issue_key}: " +
+            ", ".join(r["mrUrl"] for r in ok_repos)
+        )
+        _try_transition_issue(issue_key, statuses["done"])
+        transition_state(branch, "awaiting-review")
+        logger.info(f"  RESUME COMPLETED: {issue_key} — {len(ok_repos)} MR(s), {len(err_repos)} failure(s)")
+    else:
+        error_summary = "; ".join(f"{r['name']}: {r['error']}" for r in err_repos) or "no MRs created"
+        _try_add_comment(issue_key, f"Pipeline failed for {issue_key}. Errors: {error_summary}")
+        _try_notify_slack(f"{issue_key} pipeline failed: {error_summary}")
+        transition_state(branch, "failed", error={
+            "phase": "developing", "agent": "pipeline",
+            "message": error_summary,
+        })
+    return True
 
 
 # ─── Rework Pipeline ───────────────────────────────────

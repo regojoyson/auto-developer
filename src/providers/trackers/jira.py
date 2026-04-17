@@ -67,25 +67,51 @@ class JiraAdapter(IssueTrackerBase):
         return os.environ.get("JIRA_BASE_URL", "https://jira.atlassian.com").rstrip("/")
 
     def parse_webhook(self, headers, payload, config):
-        """Parse a Jira webhook payload for a matching status transition.
+        """Parse a Jira webhook payload for a matching event.
+
+        Recognises two event types:
+        - ``trigger``: a status transition to the configured trigger status
+          (e.g. "Ready for Development"). Starts a fresh pipeline run.
+        - ``comment``: a new comment on an existing ticket. The route uses
+          this to detect replies on blocked tickets and resume the pipeline.
 
         Args:
             headers: HTTP request headers from the incoming webhook.
             payload: The JSON body of the Jira webhook event.
-            config: The ``issue_tracker`` section from config.yaml, must
-                contain a ``trigger_status`` key with the target status name.
+            config: The ``issue_tracker`` section from config.yaml; must
+                contain a ``trigger_status`` key.
 
         Returns:
-            dict or None: A dict with keys ``issue_key`` (str), ``summary``
-                (str), and ``component`` (str or None) if the webhook
-                represents a status change to the trigger status. Returns
-                None if the event should be ignored.
+            dict or None:
+                ``{"event_type": "trigger", "issue_key", "summary", "component"}``
+                or ``{"event_type": "comment", "issue_key", "comment_body",
+                "comment_author"}``, or None if the event should be ignored.
         """
-        changelog = payload.get("changelog", {})
-        items = changelog.get("items", [])
-        if not items:
+        issue = payload.get("issue", {})
+        issue_key = issue.get("key")
+        if not issue_key:
             return None
 
+        event = payload.get("webhookEvent", "")
+
+        # ── Comment event (used for resume-from-blocked) ────
+        if event in ("comment_created", "jira:issue_commented") or "comment" in payload:
+            comment = payload.get("comment") or {}
+            body = comment.get("body", "")
+            if isinstance(body, dict):
+                body = _extract_adf_text(body)
+            author = comment.get("author", {}).get("displayName", "")
+            if body:
+                return {
+                    "event_type": "comment",
+                    "issue_key": issue_key,
+                    "comment_body": body,
+                    "comment_author": author,
+                }
+
+        # ── Status transition (trigger) ─────────────────────
+        changelog = payload.get("changelog", {})
+        items = changelog.get("items", [])
         status_change = next((i for i in items if i.get("field") == "status"), None)
         if not status_change:
             return None
@@ -94,14 +120,10 @@ class JiraAdapter(IssueTrackerBase):
         if new_status != config["trigger_status"]:
             return None
 
-        issue = payload.get("issue", {})
-        issue_key = issue.get("key")
-        if not issue_key:
-            return None
-
         fields = issue.get("fields", {})
         components = fields.get("components", [])
         return {
+            "event_type": "trigger",
             "issue_key": issue_key,
             "summary": fields.get("summary", ""),
             "component": components[0]["name"] if components else None,

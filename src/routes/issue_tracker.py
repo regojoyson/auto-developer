@@ -16,8 +16,8 @@ import threading
 from fastapi import APIRouter, Request
 
 from src.config import config as app_config
-from src.state.manager import get_state, create_state
-from src.executor.pipeline import run_pipeline_phases
+from src.state.manager import get_state, create_state, find_state_by_issue_key
+from src.executor.pipeline import run_pipeline_phases, resume_from_blocked
 from src.repos.resolver import get_repo_dir, prepare_repo, get_base_branch
 from src.providers.issue_tracker import get_issue_tracker
 
@@ -50,7 +50,37 @@ async def handle_webhook(request: Request):
     if not parsed:
         return {"ignored": True}
 
+    event_type = parsed.get("event_type", "trigger")
     issue_key = parsed["issue_key"]
+
+    # ── Comment event: resume a blocked pipeline if applicable ─
+    if event_type == "comment":
+        # Skip bot/self comments so the pipeline's own posts don't trigger
+        # a resume loop. We identify self-posts by checking the author
+        # against configured bot users on the git provider section (best
+        # proxy for "our" service account) and by ignoring the resume
+        # acknowledgement itself.
+        body = parsed.get("comment_body", "")
+        author = parsed.get("comment_author", "")
+        git_bots = app_config.get("git_provider", {}).get("bot_users", []) or []
+        if author and any(bot.lower() in author.lower() for bot in git_bots):
+            return {"ignored": True, "reason": "comment from bot"}
+        if body.startswith("Reply received — resuming pipeline"):
+            return {"ignored": True, "reason": "self comment"}
+
+        state = find_state_by_issue_key(issue_key)
+        if not state or state.get("state") != "blocked":
+            return {"ignored": True, "reason": "not blocked"}
+
+        logger.info(f"Resuming blocked pipeline for {issue_key} — comment from {author or 'unknown'}")
+        threading.Thread(
+            target=resume_from_blocked,
+            args=(issue_key, body),
+            daemon=True,
+        ).start()
+        return {"accepted": True, "resumed": True, "issueKey": issue_key}
+
+    # ── Trigger event: start a fresh pipeline ──────────
     summary = parsed["summary"]
     component = parsed.get("component")
 

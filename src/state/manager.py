@@ -8,9 +8,10 @@ to prevent duplicate processing.
 State flow:
     (new) → analyzing → planning → developing → awaiting-review → merged
                 |           |          |              ↓       ↑
-                +-----+-----+----------+           reworking ──┘
-                      |
-                    failed
+                |           |          |           reworking ──┘
+                ↓           ↓          +-----+----- failed
+             blocked ──→ planning ─────┘
+                (resumes on new Jira comment)
 
 Usage:
     from src.state.manager import create_state, get_state, transition_state
@@ -35,11 +36,12 @@ STATE_DIR = Path(__file__).parent.parent.parent / ".pipeline-state"
 # Defines which state transitions are allowed.
 # Key = current state, Value = list of states it can transition to.
 VALID_TRANSITIONS = {
-    "analyzing": ["planning", "failed"],
-    "planning": ["developing", "failed"],
+    "analyzing": ["planning", "blocked", "failed"],
+    "planning": ["developing", "blocked", "failed"],
     "developing": ["awaiting-review", "failed"],
     "awaiting-review": ["reworking", "merged"],
     "reworking": ["awaiting-review", "failed"],
+    "blocked": ["planning", "failed"],  # Resume via new Jira comment
 }
 
 
@@ -467,6 +469,30 @@ def delete_state_by_issue_key(issue_key: str) -> bool:
             f.unlink()
             return True
     return False
+
+
+def find_state_by_issue_key(issue_key: str) -> dict | None:
+    """Find the pipeline state for a given issue key.
+
+    Scans all state files to find the one matching the given issue key.
+    Returns the first match — in practice only one branch exists per
+    issue key at a time.
+
+    Args:
+        issue_key: Ticket identifier (e.g. "EV-14942").
+
+    Returns:
+        State dict or None if no state file matches.
+    """
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    for f in STATE_DIR.glob("*.json"):
+        try:
+            state = json.loads(f.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if state.get("issueKey") == issue_key:
+            return state
+    return None
 
 
 def list_active_states() -> list[dict]:

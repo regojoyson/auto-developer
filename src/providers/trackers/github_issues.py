@@ -60,6 +60,25 @@ class GitHubIssuesAdapter(IssueTrackerBase):
                 the trigger label being applied. Returns None otherwise.
         """
         event = headers.get("x-github-event")
+        repo_name = payload.get("repository", {}).get("name", "")
+        issue = payload.get("issue", {})
+        issue_number = issue.get("number", "")
+
+        # ── Comment event (resume-from-blocked) ────────
+        if event == "issue_comment" and payload.get("action") == "created":
+            comment = payload.get("comment", {}) or {}
+            body = comment.get("body", "")
+            author = comment.get("user", {}).get("login", "")
+            if body and issue_number:
+                return {
+                    "event_type": "comment",
+                    "issue_key": f"{repo_name}#{issue_number}",
+                    "comment_body": body,
+                    "comment_author": author,
+                }
+            return None
+
+        # ── Label event (trigger) ──────────────────────
         if event != "issues":
             return None
 
@@ -70,10 +89,9 @@ class GitHubIssuesAdapter(IssueTrackerBase):
         if label_name != config["trigger_status"]:
             return None
 
-        issue = payload.get("issue", {})
-        repo_name = payload.get("repository", {}).get("name", "")
         return {
-            "issue_key": f"{repo_name}#{issue.get('number', '')}",
+            "event_type": "trigger",
+            "issue_key": f"{repo_name}#{issue_number}",
             "summary": issue.get("title", ""),
             "component": None,
         }
