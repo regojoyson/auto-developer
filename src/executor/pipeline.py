@@ -533,16 +533,16 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
 # ─── Rework Pipeline ───────────────────────────────────
 
 def run_rework_phases(issue_key, branch, pr_id, statuses, repo_dir):
-    """Drive the rework loop: parse feedback -> apply fixes -> awaiting-review.
+    """Drive the rework loop: parse feedback -> apply fixes -> push -> awaiting-review.
 
-    Uses the SAME feature branch as the original implementation.
-    Runs synchronously in a background thread.
+    Same feature branch as the original implementation. Python now handles
+    the push; the rework agent commits locally only.
 
     Args:
         issue_key: Ticket key (e.g. "EV-14942").
         branch: Git branch name (same branch as original MR/PR).
         pr_id: PR/MR identifier.
-        statuses: Dict with keys: trigger, development, done, blocked.
+        statuses: Dict of issue status names.
         repo_dir: Absolute path to the target repo directory.
     """
     state = get_state(branch)
@@ -550,95 +550,63 @@ def run_rework_phases(issue_key, branch, pr_id, statuses, repo_dir):
 
     logger.info(f"\n{'='*60}")
     logger.info(f"  REWORK STARTED: {issue_key} (iteration {rework_num})")
-    logger.info(f"  Branch: {branch} (same as original MR)")
+    logger.info(f"  Branch: {branch}")
     logger.info(f"  PR/MR: {pr_id}")
-    logger.info(f"  Repo: {repo_dir}")
     logger.info(f"{'='*60}\n")
 
-    # ── Step 1: Prepare repo — checkout the SAME feature branch ──
     base_branch = get_base_branch()
-    _log_step(issue_key, f"Checking out feature branch {branch} (same branch as MR)...")
+    _log_step(issue_key, f"Checking out feature branch {branch}...")
     _prepare_repo_for_branch(repo_dir, base_branch, feature_branch=branch)
 
-    # ── Step 2: Transition ticket to Development ─────────
     if is_api_mode():
-        _log_step(issue_key, f"Transitioning ticket to '{statuses['development']}' (via REST API)...")
+        _log_step(issue_key, f"Transitioning ticket to '{statuses['development']}'...")
         try:
             adapter, _ = get_issue_tracker()
             adapter.transition_issue(issue_key, statuses["development"])
-            _log_step(issue_key, f"Ticket transitioned to '{statuses['development']}' successfully")
         except Exception as e:
-            error_msg = str(e)
-            _log_step(issue_key, f"CRITICAL: Failed to transition ticket — {error_msg}")
             transition_state(branch, "failed", error={
-                "phase": "reworking",
-                "agent": "pipeline",
-                "message": f"Failed to transition ticket: {error_msg}",
+                "phase": "reworking", "agent": "pipeline",
+                "message": f"Failed to transition ticket: {e}",
             })
             return
-    else:
-        _log_step(issue_key, "Ticket transition will be handled by agent via MCP")
 
-    _log_step(issue_key, "Transitioning state: awaiting-review → reworking")
     transition_state(branch, "reworking")
 
-    # ── Step 3: Parse review feedback ────────────────────
-    # Feedback parser reads MR comments, writes FEEDBACK.md
-    _log_phase(issue_key, "feedback-parser", "Parsing review comments from MR...")
-    record_phase_start(branch, "reworking", "feedback-parser")
-    try:
-        feedback_input = json.dumps({
-            "issueKey": issue_key,
-            "branch": branch,
-            "prId": pr_id,
-        })
-        feedback_result = run_agent("feedback-parser", feedback_input, cwd=repo_dir, issue_key=issue_key)
-        if not feedback_result.get("success"):
-            record_phase_end(branch, feedback_result.get("exit_code", -1), "failed")
-            _handle_agent_failure(issue_key, branch, "feedback-parser", feedback_result, statuses)
-            return
-        record_phase_end(branch, 0, "success")
-        _log_phase(issue_key, "feedback-parser", "FEEDBACK.md written successfully")
-    except Exception as e:
-        record_phase_end(branch, -1, "failed")
-        _handle_agent_failure(issue_key, branch, "feedback-parser",
-            {"success": False, "error": str(e)}, statuses)
+    # ── Step 1: Parse feedback ───────────────────────────
+    feedback_input = json.dumps({"issueKey": issue_key, "branch": branch, "prId": pr_id})
+    result = _run_phase(
+        issue_key, branch, "feedback-parser", "feedback-parser",
+        feedback_input, statuses, repo_dir,
+        phase_scope=FEEDBACK_PARSER_SCOPE,
+    )
+    if result is None:
         return
 
-    # ── Step 4: Apply rework fixes ───────────────────────
-    # Developer agent reads FEEDBACK.md, applies changes, commits, pushes
-    _log_phase(issue_key, "orchestrator:rework", f"Applying review feedback (iteration {rework_num})...")
-    record_phase_start(branch, "reworking", "orchestrator:rework")
-    try:
-        rework_input = json.dumps({
-            "action": "rework",
-            "issueKey": issue_key,
-            "branch": branch,
-            "statuses": statuses,
-        })
-        rework_result = run_agent("orchestrator", rework_input, cwd=repo_dir, issue_key=issue_key)
-        if not rework_result.get("success"):
-            record_phase_end(branch, rework_result.get("exit_code", -1), "failed")
-            _handle_agent_failure(issue_key, branch, "orchestrator:rework", rework_result, statuses)
-            return
-        record_phase_end(branch, 0, "success")
-        _log_phase(issue_key, "orchestrator:rework", "Rework changes committed and pushed")
-    except Exception as e:
-        record_phase_end(branch, -1, "failed")
-        _handle_agent_failure(issue_key, branch, "orchestrator:rework",
-            {"success": False, "error": str(e)}, statuses)
+    # ── Step 2: Apply rework ─────────────────────────────
+    rework_input = json.dumps({"issueKey": issue_key, "branch": branch})
+    result = _run_phase(
+        issue_key, branch, "rework", "orchestrator:rework",
+        rework_input, statuses, repo_dir,
+        phase_scope=REWORK_SCOPE,
+    )
+    if result is None:
         return
 
-    # ── Step 5: Complete — back to awaiting review ───────
-    _log_step(issue_key, "Transitioning state: reworking → awaiting-review")
+    # ── Step 3: Python pushes ────────────────────────────
+    _log_step(issue_key, f"Pushing rework commits on {branch}...")
+    try:
+        push_local_branch(repo_dir, branch)
+    except Exception as e:
+        transition_state(branch, "failed", error={
+            "phase": "reworking", "agent": "pipeline",
+            "message": f"git push failed: {e}",
+        })
+        return
+
+    # ── Step 4: Complete — back to awaiting review ───────
     transition_state(branch, "awaiting-review")
-    _log_step(issue_key, f"Transitioning ticket to '{statuses['done']}'...")
     _try_transition_issue(issue_key, statuses["done"])
-    _try_add_comment(issue_key, f"Rework iteration {rework_num} completed for {issue_key}. Awaiting re-review.")
-    _try_notify_slack(f"Rework completed for {issue_key} (iteration {rework_num})")
+    _try_add_comment(issue_key, f"Rework iteration {rework_num} complete for {issue_key}.")
+    _try_notify_slack(f"Rework complete for {issue_key} (iteration {rework_num})")
 
-    logger.info(f"\n{'='*60}")
     logger.info(f"  REWORK COMPLETED: {issue_key} (iteration {rework_num})")
-    logger.info(f"  State: awaiting-review")
-    logger.info(f"  Branch: {branch}")
-    logger.info(f"{'='*60}\n")
