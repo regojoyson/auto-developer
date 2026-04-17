@@ -16,6 +16,10 @@ all @abstractmethod methods. See docs/custom-providers.md for examples.
 """
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.executor.phase_scope import PhaseScope
 
 
 class IssueTrackerBase(ABC):
@@ -219,13 +223,22 @@ class CliAdapterBase(ABC):
         ...
 
     @abstractmethod
-    def build_args(self, agent_name: str, input_text: str, config: dict) -> list[str]:
+    def build_args(
+        self,
+        agent_name: str,
+        input_text: str,
+        config: dict,
+        phase_scope: "PhaseScope | None" = None,
+    ) -> list[str]:
         """Build CLI arguments for invoking an agent.
 
         Args:
             agent_name: Agent name (e.g. 'orchestrator', 'brainstorm').
             input_text: JSON string input to pass to the agent.
             config: cli_adapter section from config.yaml.
+            phase_scope: Optional per-phase tool sandbox. Adapters translate
+                this into native flags (e.g. ``--allowed-tools``). When None,
+                no phase restrictions apply (adapter default behaviour).
 
         Returns:
             List of CLI argument strings.
