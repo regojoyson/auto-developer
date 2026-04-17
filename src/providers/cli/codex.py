@@ -27,29 +27,36 @@ class CodexAdapter(CliAdapterBase):
     config_dir = ".codex"
     rules_file_name = "AGENTS.md"
 
-    def build_args(self, agent_name, input_text, config):
+    def build_args(self, agent_name, input_text, config, phase_scope=None):
         """Build command-line arguments for a Codex agent invocation.
 
-        The agent name is embedded in the prompt as a ``[Agent: ...]``
-        prefix so the CLI can route to the correct agent behavior.
-
-        Args:
-            agent_name: Name of the agent to invoke (e.g. ``"orchestrator"``).
-            input_text: JSON-encoded input string to pass to the agent.
-            config: The ``cli_adapter`` section from config.yaml. Supports
-                optional keys ``model`` and ``extra_args``.
-
-        Returns:
-            list[str]: CLI argument strings suitable for subprocess execution.
+        ``phase_scope`` is accepted for interface parity but Codex does not
+        yet expose a fine-grained tool-allowlist flag. Fields other than
+        None are logged at debug level and otherwise ignored.
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
         prompt = f"[Agent: {agent_name}]\n{input_text}"
-        args = [
-            "--prompt", prompt,
-            "--full-auto",              # auto-approve all actions
-        ]
+        args = ["--prompt", prompt, "--full-auto"]
+
         if config.get("model"):
             args.extend(["--model", config["model"]])
         args.extend(config.get("extra_args") or [])
+
+        if phase_scope:
+            ignored = [
+                name for name, value in (
+                    ("allowed_tools", phase_scope.allowed_tools),
+                    ("disallowed_tools", phase_scope.disallowed_tools),
+                    ("allowed_mcp_servers", phase_scope.allowed_mcp_servers),
+                    ("allowed_subagents", phase_scope.allowed_subagents),
+                    ("max_turns", phase_scope.max_turns),
+                ) if value is not None
+            ]
+            if ignored:
+                logger.debug(f"Codex adapter ignoring unsupported phase_scope fields: {ignored}")
+
         return args
 
     def parse_output(self, stdout, stderr, exit_code):
