@@ -465,27 +465,53 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
 
     _try_add_comment(issue_key, f"Plan written for {issue_key}. See PLAN.md on branch `{branch}`.")
 
-    # ── Step 5: Prepare repo for implementation ──────────
-    # Checkout the feature branch locally so developer agent can work
+    # ── Step 6: Phase 3 — Implement ─────────────────────
     _log_step(issue_key, "Transitioning state: planning → developing")
     transition_state(branch, "developing")
     _log_step(issue_key, f"Checking out feature branch {branch} for implementation...")
     _prepare_repo_for_branch(repo_dir, base_branch, feature_branch=branch)
 
-    # ── Step 6: Phase 3 — Implement ─────────────────────
-    # Developer agent writes code, commits, pushes, creates MR/PR
     implement_input = json.dumps({
-        "action": "implement",
         "issueKey": issue_key,
         "branch": branch,
-        "summary": summary,
-        "baseBranch": base_branch,
-        "statuses": statuses,
-        "apiMode": api_mode,
     })
-    result = _run_phase(issue_key, branch, "orchestrator", "orchestrator:implement",
-                        implement_input, statuses, repo_dir)
+    result = _run_phase(
+        issue_key, branch, "implement", "orchestrator:implement",
+        implement_input, statuses, repo_dir,
+        phase_scope=IMPLEMENT_SCOPE,
+    )
     if result is None:
+        return
+
+    # Python pushes the branch (agent committed locally but cannot push).
+    _log_step(issue_key, f"Pushing {branch} to origin...")
+    try:
+        push_local_branch(repo_dir, branch)
+    except Exception as e:
+        _log_step(issue_key, f"CRITICAL: git push failed — {e}")
+        transition_state(branch, "failed", error={
+            "phase": "developing", "agent": "pipeline",
+            "message": f"git push failed: {e}",
+        })
+        return
+
+    # Python creates the MR via git-provider API.
+    _log_step(issue_key, "Creating merge/pull request...")
+    try:
+        mr = create_merge_request(
+            git_api,
+            source=branch,
+            target=base_branch,
+            title=f"feat({issue_key}): {summary}",
+            description=f"Ticket: {issue_key}\n\nSee PLAN.md for the file-level change list.",
+        )
+        mr_url = mr.get("web_url") or mr.get("html_url") or mr.get("url") or "(no URL returned)"
+    except Exception as e:
+        _log_step(issue_key, f"CRITICAL: MR creation failed — {e}")
+        transition_state(branch, "failed", error={
+            "phase": "developing", "agent": "pipeline",
+            "message": f"MR creation failed: {e}",
+        })
         return
 
     # ── Step 7: Complete — awaiting review ───────────────
@@ -493,13 +519,14 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
     transition_state(branch, "awaiting-review")
     _log_step(issue_key, f"Transitioning ticket to '{statuses['done']}'...")
     _try_transition_issue(issue_key, statuses["done"])
-    _try_add_comment(issue_key, f"Implementation completed for {issue_key}. MR created. Awaiting review.")
-    _try_notify_slack(f"MR created for {issue_key}")
+    _try_add_comment(issue_key, f"Implementation complete for {issue_key}. MR: {mr_url}")
+    _try_notify_slack(f"MR created for {issue_key}: {mr_url}")
 
     logger.info(f"\n{'='*60}")
     logger.info(f"  PIPELINE COMPLETED: {issue_key}")
     logger.info(f"  State: awaiting-review")
     logger.info(f"  Branch: {branch}")
+    logger.info(f"  MR: {mr_url}")
     logger.info(f"{'='*60}\n")
 
 
