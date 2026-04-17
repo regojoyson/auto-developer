@@ -114,7 +114,11 @@ class ClaudeCodeAdapter(CliAdapterBase):
             mcp_path.write_text(
                 json.dumps({"mcpServers": self._filter_mcp_servers(scope.allowed_mcp_servers)})
             )
-            args.extend(["--mcp-config", str(mcp_path)])
+            # --strict-mcp-config makes Claude Code ignore all user/global MCP
+            # settings and use ONLY the servers listed in --mcp-config. Without
+            # this, user-level MCP servers (e.g. Atlassian) remain visible and
+            # the agent will attempt to call them, causing permission errors.
+            args.extend(["--mcp-config", str(mcp_path), "--strict-mcp-config"])
 
         return args
 
