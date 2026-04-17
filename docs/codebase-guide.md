@@ -34,10 +34,11 @@ Markdown files that define what each AI agent does. The `runner.py` prepends an 
 
 | File | Purpose |
 |------|---------|
-| `orchestrator.md` | The main pipeline agent. Split into 5 actions: `analyze`, `plan`, `implement`, `rework`, `merge-approved`, `rework-limit-exceeded`. Python server invokes it once per phase with a different action. |
-| `brainstorm.md` | Invoked by orchestrator during the `plan` action. Reads TICKET.md, explores the codebase, writes PLAN.md. |
-| `developer.md` | Invoked by orchestrator during `implement` and `rework` actions. Reads PLAN.md (or FEEDBACK.md) and writes actual code, commits, pushes. |
-| `feedback-parser.md` | Invoked during rework phase. Reads review comments on the MR and writes FEEDBACK.md for the developer agent to act on. |
+| `analyze.md` | Invoked during analyze phase. Reads ticket data from issue tracker, explores the codebase, writes TICKET.md. |
+| `plan.md` | Invoked during plan phase. Reads TICKET.md, explores the codebase, writes PLAN.md. |
+| `implement.md` | Invoked during implement phase. Reads PLAN.md and writes actual code, commits locally. |
+| `rework.md` | Invoked during rework phase. Reads PLAN.md and FEEDBACK.md, applies fixes, commits locally. |
+| `feedback-parser.md` | Invoked during rework phase. Reads review comments on the MR and writes FEEDBACK.md for the rework agent to act on. |
 | `RULES.md` | Global rules applied to all agents — no-interaction mode, skill-ignoring, commit message format, etc. |
 
 ---
@@ -85,8 +86,10 @@ The engine that runs agents and drives the pipeline.
 
 | File | Purpose |
 |------|---------|
-| `runner.py` | Spawns the AI CLI as a subprocess, streams stdout/stderr to output handlers line by line. Prepends `AUTONOMY_PREAMBLE` + `SKILLS_DISABLED_PREAMBLE` (if configured) + `NO_SLACK_PREAMBLE` (if notifications disabled) to every agent input. |
-| `pipeline.py` | **The core controller.** `run_pipeline_phases()` drives analyze → plan → implement. `run_rework_phases()` drives rework. Handles state transitions, Jira API calls (in api mode), error handling, best-effort Slack notifications. Phase-by-phase orchestration. |
+| `runner.py` | Spawns the AI CLI as a subprocess, streams stdout/stderr to output handlers line by line. Applies `PhaseScope` restrictions (via `--allowed-tools` / `--disallowed-tools` / `--mcp-config` flags). Prepends `AUTONOMY_PREAMBLE` + `SKILLS_DISABLED_PREAMBLE` (if configured) + `NO_SLACK_PREAMBLE` (if notifications disabled) to every agent input. |
+| `pipeline.py` | **The core controller.** `run_pipeline_phases()` invokes analyze → plan → implement phase agents sequentially. `run_rework_phases()` invokes rework phase agent. Handles state transitions, issue tracker API calls (in api mode), error handling, best-effort Slack notifications. Delegates remote git operations to `pipeline_git.py`. |
+| `pipeline_git.py` | **Python-driven remote git operations.** Implements `create_feature_branch()`, `commit_via_api()`, `push_to_remote()`, and `create_mr()`. Called from `pipeline.py` after each phase completes. |
+| `phase_scope.py` | Per-phase tool sandbox. Defines a `PhaseScope` dataclass with per-phase allowlists for issue tracker operations, git operations, MCP tools, and CLI skills. Used by `runner.py` to restrict agent capabilities. |
 
 ### `src/routes/`
 FastAPI route handlers.
@@ -282,29 +285,34 @@ Tailwind + custom CSS for badges (`.badge-analyzing`, `.badge-failed`, etc.), lo
    ├── adapter.read_issue() — [api mode only, passes ticketData to agent]
    │
    ├── Phase 1 — Analyze
-   │   └── _run_phase("orchestrator", "orchestrator:analyze")
+   │   └── _run_phase("analyze") with PhaseScope("analyze")
    │       └── run_agent() (src/executor/runner.py)
-   │           └── subprocess.Popen(claude, ...)
-   │               └── reads agents/orchestrator.md (action=analyze)
-   │               └── creates feature branch via Git MCP
-   │               └── writes TICKET.md, commits via Git MCP
-   │               └── posts analysis comment on Jira
+   │           └── subprocess.Popen(claude, --allowed-tools=...)
+   │               └── reads agents/analyze.md
+   │               └── writes TICKET.md
    │               └── outputs __PIPELINE_RESULT__:{"blocked":false}
+   │   └── pipeline_git.create_feature_branch() — create branch via API
+   │   └── pipeline_git.commit_via_api() — commit TICKET.md via API
    │   └── record_phase_end(success)
    │
    ├── Phase 2 — Plan
-   │   └── _run_phase("orchestrator", "orchestrator:plan")
-   │       └── orchestrator invokes brainstorm agent
-   │           └── brainstorm writes PLAN.md
-   │       └── orchestrator posts plan comment on Jira
+   │   └── _run_phase("plan") with PhaseScope("plan")
+   │       └── run_agent() (src/executor/runner.py)
+   │           └── subprocess.Popen(claude, --allowed-tools=...)
+   │               └── reads agents/plan.md
+   │               └── writes PLAN.md
+   │   └── pipeline_git.commit_via_api() — commit PLAN.md via API
+   │   └── record_phase_end(success)
    │
    ├── Phase 3 — Implement
    │   └── _prepare_repo_for_branch(feature_branch=branch) — checkout
-   │   └── _run_phase("orchestrator", "orchestrator:implement")
-   │       └── orchestrator invokes developer agent
-   │           └── developer writes code, commits locally
-   │       └── orchestrator runs git push origin <branch>
-   │       └── orchestrator creates MR via Git MCP
+   │   └── _run_phase("implement") with PhaseScope("implement")
+   │       └── run_agent() (src/executor/runner.py)
+   │           └── subprocess.Popen(claude, --allowed-tools=...)
+   │               └── reads agents/implement.md
+   │               └── writes code, commits locally
+   │   └── pipeline_git.push_to_remote() — git push via API
+   │   └── pipeline_git.create_mr() — create MR/PR via API
    │
    └── transition_state("awaiting-review")
        └── adapter.transition_issue() — Development → Done [api mode only]
@@ -316,8 +324,10 @@ Tailwind + custom CSS for badges (`.badge-analyzing`, `.badge-failed`, etc.), lo
    │
    └── comments → webhook → POST /webhooks/git (event=comment)
        └── threading.Thread(target=run_rework_phases, ...)
-           ├── feedback-parser agent reads MR comments → FEEDBACK.md
-           └── orchestrator invokes developer (rework mode) → applies fixes
+           ├── _run_phase("feedback-parser") — parse MR comments → FEEDBACK.md
+           ├── pipeline_git.commit_via_api() — commit FEEDBACK.md via API
+           ├── _run_phase("rework") with PhaseScope("rework") — apply fixes, commit locally
+           ├── pipeline_git.push_to_remote() — git push via API
            └── transition_state("awaiting-review")
 ```
 
@@ -350,7 +360,7 @@ Tailwind + custom CSS for badges (`.badge-analyzing`, `.badge-failed`, etc.), lo
 | Add a new git provider | `src/providers/git/newgit.py` + register + add MCP server in `mcp_servers/` |
 | Add a new AI CLI | `src/providers/cli/newcli.py` + register + add to `choices.py` |
 | Change agent behavior | Edit `.md` file in `agents/` |
-| Add a new pipeline phase | Add to `VALID_TRANSITIONS` in `state/manager.py`, add phase in `pipeline.py`, add action in `orchestrator.md` |
+| Add a new pipeline phase | Add to `VALID_TRANSITIONS` in `state/manager.py`, add phase invocation in `pipeline.py`, create agent prompt file in `agents/` |
 | Change what the TUI asks | `installer/setup.py` + `installer/choices.py` |
 | Change state file structure | `src/state/manager.py` (and update dashboard if shown) |
 | Add an API endpoint | New file in `src/routes/` + register in `server.py` |
