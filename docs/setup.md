@@ -14,15 +14,15 @@ Before starting, make sure you have everything installed and configured.
 See the full checklist: **[prerequisites.md](prerequisites.md)**
 
 Key items:
-- **Node.js** >= 18
+- **Python** >= 3.10
 - **AI Coding CLI** installed and authenticated (Claude Code / Codex / Gemini)
 - **Git** installed
 - **Git provider token** (GitLab or GitHub)
-- **Jira MCP configured in your CLI** (if using Jira as issue tracker)
-- **Slack MCP configured in your CLI** (if using Slack notifications)
+- **Issue tracker REST credentials** — Jira (`JIRA_BASE_URL` + `JIRA_EMAIL` + `JIRA_TOKEN`) or GitHub Issues (`GITHUB_TOKEN` + `GITHUB_OWNER`) — stored in `.env` by the wizard
+- **Slack MCP configured in your CLI** (only if using Slack notifications)
 - **Server with public IP or domain** (for webhook delivery from issue trackers / git providers)
 
-**Important:** The Jira and Slack MCP servers are configured in your CLI tool (e.g. `~/.claude/settings.json`), not in Auto Developer. See [prerequisites.md](prerequisites.md) for setup instructions.
+The pipeline talks to your issue tracker over REST directly — no Jira/GitHub-Issues MCP setup required.
 
 ---
 

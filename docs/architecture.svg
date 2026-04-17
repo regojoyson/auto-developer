@@ -209,4 +209,5 @@
   <!-- ═══ State flow at bottom ═══ -->
   <text x="480" y="505" text-anchor="middle" font-size="11" font-weight="600" fill="#374151">State Flow:</text>
   <text x="480" y="520" text-anchor="middle" font-size="11" fill="#555">analyzing → planning → developing → awaiting-review → merged | failed</text>
+  <text x="480" y="535" text-anchor="middle" font-size="10" fill="#a16207" font-style="italic">(analyze/plan can emit “blocked” — resumes on new Jira comment)</text>
 </svg>

@@ -61,7 +61,7 @@ DELETE /api/status/{issueKey}
 ```
 
 ### `src/config.py`
-Reads and parses `config.yaml` into a cached Python dict. Splits `issueTracker.type` (e.g. `jira-api`) into `platform` + `api_mode` for internal use. Auto-loads on first import so `from src.config import config` just works.
+Reads and parses `config.yaml` into a cached Python dict. Normalises `issueTracker.type` (`jira` / `github-issues`) to an internal `platform`. Old `-mcp` / `-api` suffixed type values are accepted as aliases for backward compatibility — all resolve to the same REST-API behavior. Auto-loads on first import so `from src.config import config` just works.
 
 ### `src/state/manager.py`
 Pipeline state machine. Each pipeline's state is stored as JSON in `.pipeline-state/{branch}.json`. Provides:
@@ -74,12 +74,16 @@ Pipeline state machine. Each pipeline's state is stored as JSON in `.pipeline-st
 
 Valid state transitions:
 ```
-analyzing → planning/failed
-planning → developing/failed
+analyzing → planning/blocked/failed
+planning → developing/blocked/failed
 developing → awaiting-review/failed
 awaiting-review → reworking/merged
 reworking → awaiting-review/failed
+blocked → planning/failed       (resumes on new Jira comment)
 ```
+
+Helpers for the resume-from-blocked path:
+- `find_state_by_issue_key(issue_key)` — look up an active state by ticket id.
 
 ### `src/executor/`
 The engine that runs agents and drives the pipeline.
@@ -113,7 +117,7 @@ Abstract base classes:
 - `OutputHandlerBase` — `on_start`, `on_output`, `on_finish`, `get_output`, `delete_logs`
 
 #### `src/providers/issue_tracker.py` (factory)
-Returns the configured issue tracker adapter based on `config.issue_tracker.platform`. Also exposes `is_api_mode()` helper.
+Returns the configured issue tracker adapter based on `config.issue_tracker.platform`. Also exposes `is_api_mode()` — kept for compatibility; always returns `True` since the pipeline always uses the REST API.
 
 #### `src/providers/trackers/`
 Issue tracker implementations:
@@ -339,7 +343,7 @@ Tailwind + custom CSS for badges (`.badge-analyzing`, `.badge-failed`, etc.), lo
 |--------------|---------|
 | `repo.mode` | `src/repos/resolver.py` — how to find the target repo |
 | `repo.baseBranch` | `src/repos/resolver.py`, `pipeline.py` — branch to create features from |
-| `issueTracker.type` | `config.py` splits into `platform` + `api_mode`; factory in `issue_tracker.py` picks adapter; `pipeline.py` behavior (api reads ticket, mcp doesn't) |
+| `issueTracker.type` | `config.py` normalises to `platform` (`jira` / `github-issues`); factory in `issue_tracker.py` picks adapter. Pipeline always reads tickets via REST. |
 | `issueTracker.*Status` | Passed to agent via `statuses` input; Python uses in `transition_issue()` calls |
 | `gitProvider.type` | Factory in `git_provider.py` picks adapter; `start.sh` generates matching MCP settings.json |
 | `cliAdapter.type` | Factory in `cli_adapter.py` picks how to invoke the CLI |

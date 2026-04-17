@@ -33,7 +33,7 @@ This document explains the full pipeline — from ticket to merged code.
 A ticket becomes ready for development. This can happen two ways:
 
 **Automatic (webhook):**
-The issue tracker (Jira / GitHub Issues) sends a webhook when the ticket status changes to the configured `triggerStatus` (e.g. "Ready for Development").
+The issue tracker sends a webhook when the ticket status changes to the configured `triggerStatus` (e.g. "Ready for Development"). The route also listens for **comments on blocked tickets** — a new comment on a ticket the pipeline previously marked `blocked` resumes the run from plan.
 
 **Manual (API call):**
 ```bash
@@ -49,64 +49,61 @@ Either way, the pipeline does the same thing next.
 
 Before any agent starts, the pipeline:
 
-1. **Resolves the target repo** — based on `config.yaml` repo mode (local dir, parent dir, or clone)
-2. **Checks out the base branch** — `git checkout main && git pull` (or whatever `baseBranch` is configured)
-3. **Creates pipeline state** — a JSON file tracking this ticket's progress
-4. **Responds immediately** — the webhook gets a 202 response, everything after is async
+1. **Reads the full ticket** via the issue tracker's REST API (summary, description, acceptance criteria, comments, attachments metadata, linked issues, all custom fields).
+2. **Resolves the target repo(s)** — based on `config.yaml` repo mode. In `parentDir` mode, the repo-picker agent chooses which sub-repos the ticket touches.
+3. **Prepares each repo** — `git stash --include-untracked`, checkout + reset to `origin/<baseBranch>`, pull latest.
+4. **Creates pipeline state** — a JSON file per feature branch.
+5. **Responds immediately** — the webhook gets a response, everything after runs async.
 
 ---
 
-## Phase 3: Orchestrator Agent
+## Phase 3: Analyze (per repo, on base branch)
 
-The orchestrator is the coordinator. It:
+For each chosen repo, the **analyze agent** runs with the working tree on the base branch (no feature branch yet):
 
-1. Reads the full ticket details via the issue tracker MCP (description, acceptance criteria, linked issues)
-2. Creates a feature branch: `feature/PROJ-42-add-login-page`
-3. Writes `TICKET.md` to the branch with all ticket context
-4. Invokes the **brainstorm agent**
+1. Reads the pre-fetched ticket data injected into its prompt.
+2. Explores the repo (read-only).
+3. Writes `TICKET.md` with the restated problem, acceptance criteria mapping, assumptions, and risks.
 
----
-
-## Phase 4: Brainstorm Agent
-
-The brainstorm agent analyzes the ticket and codebase:
-
-1. Reads `TICKET.md` for requirements
-2. Explores the codebase (file structure, patterns, dependencies)
-3. Generates 2-3 candidate approaches with trade-offs
-4. Selects the best approach
-5. Writes `PLAN.md` with:
-   - Chosen approach and reasoning
-   - File change list (create/modify/delete)
-   - Implementation steps
-   - Acceptance criteria mapping
-
-The brainstorm agent does **not** write code — only the plan.
+If the agent decides the ticket lacks enough detail, it emits `blocked: true` with a reason. The pipeline then:
+- Transitions the state machine to `blocked`.
+- Posts a Jira comment describing what's missing and asks the reporter to reply.
+- Sets the Jira ticket to `blockedStatus`.
+- Stops. A new comment on the ticket resumes from plan.
 
 ---
 
-## Phase 5: Developer Agent
+## Phase 4: Post analyze summary to Jira → transition to Development
 
-The developer agent implements from the plan:
+After every repo finishes analyze successfully, the pipeline:
 
-1. Reads `PLAN.md`
-2. Implements every file change listed
-3. Runs tests if present
-4. Commits with message: `feat(PROJ-42): add login page`
+1. Posts the contents of each `TICKET.md` as a Jira comment (prefixed with the repo name in multi-repo mode).
+2. Transitions the Jira ticket to `developmentStatus` (e.g. "Development").
+
+Only now does the feature branch get created.
 
 ---
 
-## Phase 6: PR/MR Creation
+## Phase 5: Plan → implement → MR (per repo)
 
-The orchestrator creates a pull/merge request:
+For each repo:
 
-- Title: `feat(PROJ-42): Add login page`
-- Description: plan summary + file changes + ticket link
-- Target branch: the configured `baseBranch`
-- Posts a comment on the ticket with the PR link
-- Sends a notification (if configured)
+1. **Create the remote feature branch** from base and commit `TICKET.md` to it.
+2. **Plan agent** — writes `PLAN.md` (file-by-file change list, test plan, risks). Can also emit `blocked: true` if planning reveals the task is under-specified.
+3. **Post `PLAN.md` to Jira** as a comment, then commit `PLAN.md` to the branch.
+4. **Implement agent** — makes the code changes locally on the feature branch.
+5. **Python** pushes the branch and opens the PR/MR (agents never touch `git push` or `gh pr create`).
 
-The pipeline state moves to `awaiting-review` and **pauses** — waiting for a human.
+---
+
+## Phase 6: Finish
+
+After all repos complete:
+
+- One aggregate Jira comment lists every repo's MR URL.
+- The ticket transitions to `doneStatus` (e.g. "Code Review").
+- Slack notification sent (if configured).
+- Pipeline state moves to `awaiting-review` and **pauses** — waiting for a human.
 
 ---
 
@@ -154,19 +151,21 @@ After 3 rework cycles (configurable), the pipeline stops and sends an escalation
 
 ```
 analyzing → planning → developing → awaiting-review → merged
-    |           |          |              ↓       ↑
-    +-----+-----+----------+          reworking ──┘
-          |
-        failed
+    ↓          ↓          |              ↓       ↑
+  blocked ← ←  +----------+          reworking ──┘
+    ↓                          |
+ planning (resumes on        failed
+ Jira comment)
 ```
 
 | State | What's happening |
 |-------|-----------------|
-| `analyzing` | Orchestrator is reading ticket, writing TICKET.md, posting analysis |
-| `planning` | Brainstorm agent is writing PLAN.md, posting plan summary |
-| `developing` | Developer agent is implementing code |
-| `awaiting-review` | PR/MR is open, waiting for human |
-| `reworking` | Developer is applying review feedback |
+| `analyzing` | Analyze agent is writing TICKET.md on the base branch |
+| `planning` | Plan agent is writing PLAN.md on the feature branch |
+| `developing` | Implement agent is writing code, Python pushes & opens the MR |
+| `awaiting-review` | PR/MR is open, waiting for human review |
+| `reworking` | Feedback parser + implement (rework) are applying review comments |
+| `blocked` | Analyze/plan flagged unclear requirements; Jira comment resumes from plan |
 | `merged` | PR approved, ticket closed |
 | `failed` | Pipeline encountered an unrecoverable error |
 

@@ -40,65 +40,37 @@ Required for the repo checkout/pull operations.
 
 ### 4. Tokens / API Keys
 
-You need tokens for your chosen git provider:
+**Issue tracker (always required — server calls REST API):**
 
-**GitLab:**
-- Personal access token with `api` scope
-- Numeric project ID (from project settings page)
+| Tracker | Credentials | Where |
+|---------|-------------|-------|
+| Jira | `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_TOKEN` | `.env` |
+| GitHub Issues | `GITHUB_TOKEN` (Issues scope), `GITHUB_OWNER` | `.env` |
 
-**GitHub:**
-- Personal access token (fine-grained) with: Contents (read/write), Pull Requests (read/write), Issues (read)
-- Repository owner and name
+Jira tokens: https://id.atlassian.com/manage-profile/security/api-tokens
+
+**Git provider:**
+
+| Provider | Token scope |
+|----------|------------|
+| GitLab | Personal access token with `api` scope |
+| GitHub | Fine-grained token: Contents (R/W), Pull Requests (R/W), Issues (R) |
+
+Project IDs / owner-repo pairs are auto-detected from each repo's git remote URL.
 
 ---
 
-## MCP Servers (Important)
+## MCP Servers
 
-Auto Developer agents use **MCP servers** to interact with external services. Some MCP servers are **built-in** to this project, and some need to be **configured in your CLI tool separately**.
+Auto Developer agents use **MCP servers** only for git-provider operations (creating branches, reading MR/PR comments during rework). The issue tracker is NOT accessed via MCP — the Python server calls its REST API directly.
 
-### Built-in MCP servers (we handle this)
+### Built-in — GitLab/GitHub git MCP
 
-These are included in the `mcp-servers/` directory and configured automatically by `start.sh`:
+Included in `mcp_servers/` and wired up automatically by `start.sh`. No manual setup needed.
 
-| MCP Server | What it does |
-|------------|-------------|
-| **GitLab MCP** | Create branches, commit files, create/update MRs, read comments |
-| **GitHub MCP** | Create branches, commit files, create/update PRs, read comments |
+### Optional — Slack MCP (only if notifications enabled)
 
-`start.sh` generates `settings.json` in the correct CLI config directory (e.g. `.claude/settings.json`) so the CLI picks them up automatically.
-
-### External MCP servers (only if using MCP mode)
-
-These are **only needed if your `config.yaml` uses `*-mcp` mode** for the issue tracker. If you chose `*-api` mode (built-in REST API), skip the issue tracker MCP — the Python server handles it directly.
-
-| MCP Server | Needed when | What it does | How to configure |
-|------------|------------|-------------|-----------------|
-| **Jira MCP** (Atlassian) | `type: jira-mcp` | Read tickets, post comments, transition issues | Configure in your CLI's MCP settings |
-| **Slack MCP** | Notifications enabled | Send notifications to channels | Configure in your CLI's MCP settings |
-
-**Not needed for `jira-api` or `github-api`** — the Python server calls the REST API directly using credentials from `.env`.
-
-#### Configuring Jira MCP in Claude Code
-
-Add to your **user-level** Claude Code settings (`~/.claude/settings.json`):
-
-```json
-{
-  "mcpServers": {
-    "atlassian": {
-      "command": "npx",
-      "args": ["-y", "@anthropic/mcp-atlassian"],
-      "env": {
-        "JIRA_URL": "https://your-org.atlassian.net",
-        "JIRA_EMAIL": "your-email@example.com",
-        "JIRA_API_TOKEN": "your-jira-api-token"
-      }
-    }
-  }
-}
-```
-
-#### Configuring Slack MCP in Claude Code
+If you enabled Slack notifications in `config.yaml`, configure Slack MCP in your CLI separately:
 
 ```json
 {
@@ -106,26 +78,21 @@ Add to your **user-level** Claude Code settings (`~/.claude/settings.json`):
     "slack": {
       "command": "npx",
       "args": ["-y", "@anthropic/mcp-slack"],
-      "env": {
-        "SLACK_BOT_TOKEN": "xoxb-your-slack-bot-token"
-      }
+      "env": { "SLACK_BOT_TOKEN": "xoxb-your-slack-bot-token" }
     }
   }
 }
 ```
 
-For other CLIs (Codex, Gemini), refer to their documentation for MCP server configuration.
+For other CLIs (Codex, Gemini), refer to their documentation.
 
-### What happens if MCP servers aren't configured?
+### What happens if something isn't configured
 
-| Missing MCP | Impact |
-|-------------|--------|
-| Jira MCP (when using `jira-mcp`) | Agent can't read ticket details or post comments. Pipeline fails at analyze phase. |
-| Jira MCP (when using `jira-api`) | **Not needed** — Python server handles Jira via REST API. |
-| Slack MCP | No notifications sent. Pipeline still works, you just won't get Slack messages. |
-| Git MCP (built-in) | Agents can't create branches or commit code. Pipeline fails. This is auto-configured by `start.sh`. |
-
----
+| Missing | Impact |
+|---------|--------|
+| Jira/GitHub REST credentials in `.env` | Pipeline can't read tickets → repo-picker fails, no analyze/plan comments posted. |
+| Slack MCP (when notifications enabled) | No Slack messages; pipeline still runs. |
+| Git MCP (built-in) | Agents can't create branches or read MR comments. Pipeline fails. Auto-configured by `start.sh`. |
 
 ---
 
@@ -137,8 +104,6 @@ Before running `./setup.sh`:
 - [ ] AI coding CLI installed and authenticated (e.g. `claude --version` works)
 - [ ] Git installed
 - [ ] Git provider token ready (GitLab or GitHub)
-- [ ] **If using `jira-mcp`:** Jira MCP configured in your CLI
-- [ ] **If using `jira-api`:** Jira API token, email, and base URL ready
-- [ ] **If using `github-api`:** GitHub token and owner ready
-- [ ] Slack MCP configured in your CLI (if using notifications)
-- [ ] Server with public IP or domain (for webhook delivery)
+- [ ] **Issue tracker credentials ready** (Jira: URL + email + token, or GitHub Issues: token + owner)
+- [ ] Slack MCP configured in your CLI (only if you plan to enable notifications)
+- [ ] Server with public IP or domain (for webhook delivery — see the "Webhooks" section of [setup.md](setup.md))

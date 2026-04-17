@@ -86,54 +86,36 @@ Repos are cloned on first use and reused after. The pipeline pulls latest before
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `type` | string | Yes | `jira-mcp` | See 4 options below |
+| `type` | string | Yes | `jira` | `jira` or `github-issues` |
 | `triggerStatus` | string | No | `Ready for Development` | Status/label that triggers the pipeline |
-| `developmentStatus` | string | No | `Development` | Status to transition to when pipeline picks up a ticket |
+| `developmentStatus` | string | No | `Development` | Status to transition to after the analysis is posted |
 | `doneStatus` | string | No | `Done` | Status to transition to after MR created |
 | `blockedStatus` | string | No | `Blocked` | Status to transition to when ticket lacks info |
 | `botUsers` | string[] | No | `[]` | Usernames to ignore in webhooks |
 
 #### Type options
 
-| Type | Platform | Integration | Who calls API | Needs in .env |
-|------|----------|------------|--------------|---------------|
-| `jira-mcp` | Jira | Agent via CLI MCP | Agent | Nothing (MCP has its own auth) |
-| `jira-api` | Jira | Python server REST API | Server | `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_TOKEN` |
-| `github-mcp` | GitHub Issues | Agent via CLI MCP | Agent | Nothing (MCP has its own auth) |
-| `github-api` | GitHub Issues | Python server REST API | Server | `GITHUB_TOKEN`, `GITHUB_OWNER` |
+| Type | Platform | Integration | Needs in .env |
+|------|----------|------------|---------------|
+| `jira` | Jira | REST API (server-side) | `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_TOKEN` |
+| `github-issues` | GitHub Issues | REST API (server-side) | `GITHUB_TOKEN`, `GITHUB_OWNER` |
 
-**MCP mode (`*-mcp`):** The AI agent handles all issue tracker interactions (reading tickets, posting comments, transitioning status) through MCP tools configured in your CLI. No REST API credentials needed in `.env`. You must configure the MCP server in your CLI tool (see [Prerequisites](prerequisites.md)).
+The Python server handles all issue tracker interactions (reading tickets, posting comments, transitioning status) directly via REST API — agents never call the issue tracker. Credentials are stored in `.env`.
 
-**API mode (`*-api`):** The Python server handles all issue tracker interactions directly via REST API. No MCP configuration needed for the issue tracker. Credentials are stored in `.env`.
+The old values `jira-mcp` / `jira-api` / `github-mcp` / `github-api` are still accepted for backward compatibility; they all resolve to the same REST-API behavior.
 
 ```yaml
-# Jira via MCP (agent handles via CLI MCP tools)
+# Jira
 issueTracker:
-  type: jira-mcp
+  type: jira
   triggerStatus: Ready for Development
   developmentStatus: Development
-  doneStatus: Done
+  doneStatus: Code Review
   blockedStatus: Blocked
 
-# Jira via built-in REST API (server calls Jira directly)
+# GitHub Issues
 issueTracker:
-  type: jira-api
-  triggerStatus: Ready for Development
-  developmentStatus: Development
-  doneStatus: Done
-  blockedStatus: Blocked
-
-# GitHub Issues via MCP
-issueTracker:
-  type: github-mcp
-  triggerStatus: ready-for-dev
-  developmentStatus: in-progress
-  doneStatus: done
-  blockedStatus: blocked
-
-# GitHub Issues via built-in REST API
-issueTracker:
-  type: github-api
+  type: github-issues
   triggerStatus: ready-for-dev
   developmentStatus: in-progress
   doneStatus: done
@@ -267,12 +249,12 @@ GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 JIRA_BASE_URL=https://your-org.atlassian.net
 JIRA_EMAIL=your-email@example.com
 JIRA_TOKEN=your-jira-api-token
-# GitHub Issues (when issueTracker.type = github-api)
+# GitHub Issues (when issueTracker.type = github-issues)
 GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 GITHUB_OWNER=your-org-or-username
 ```
 
-**Note:** If using `*-mcp` mode for the issue tracker, no issue tracker credentials are needed in `.env` — the MCP server configured in your CLI handles authentication.
+REST API credentials are always required. The Python server uses them for ticket reads, status transitions, and posting pipeline comments (analysis summary, plan, MR links).
 
 ---
 
@@ -288,10 +270,10 @@ repo:
   baseBranch: develop
 
 issueTracker:
-  type: jira-api
+  type: jira
   triggerStatus: Ready for Development
   developmentStatus: Development
-  doneStatus: Done
+  doneStatus: Code Review
   blockedStatus: Blocked
 
 gitProvider:
@@ -337,8 +319,5 @@ A: One git provider per config. For mixed setups, run separate auto-pilot instan
 **Q: How do I add a new provider?**
 A: See the [Custom Providers Guide](custom-providers.md).
 
-**Q: Should I use MCP mode or API mode for my issue tracker?**
-A: **MCP mode** if you already have the MCP server configured in your CLI and want the agent to handle everything. **API mode** if you don't want to configure MCP for the issue tracker — the Python server handles it directly via REST API. API mode is simpler to set up (just add credentials to `.env`).
-
-**Q: Can I switch between MCP and API mode later?**
-A: Yes — just change the `type` field in `config.yaml` and restart. If switching to `*-api`, add the REST API credentials to `.env`. If switching to `*-mcp`, configure the MCP server in your CLI.
+**Q: I see my config uses `jira-mcp` — do I need to migrate?**
+A: No — `jira-mcp`, `jira-api`, `github-mcp`, `github-api` are all accepted as aliases for `jira` / `github-issues` and resolve to the same REST-API behavior. New setups pick the short form. Re-running `./setup.sh` migrates the value automatically.
