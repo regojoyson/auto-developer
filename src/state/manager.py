@@ -56,6 +56,34 @@ def _state_path(branch: str) -> Path:
     return STATE_DIR / f"{safe}.json"
 
 
+def _atomic_write(branch: str, state: dict) -> None:
+    """Write state JSON atomically (temp file + rename).
+
+    Prevents a partial write from corrupting the state if the process dies
+    mid-write or two threads try to write at the same time.
+    """
+    import os
+    import tempfile
+
+    path = _state_path(branch)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write to a sibling temp file then atomic rename onto the target.
+    fd, tmp = tempfile.mkstemp(
+        prefix=f"{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def get_state(branch: str) -> dict | None:
     """Read the current pipeline state for a branch.
 
@@ -71,19 +99,57 @@ def get_state(branch: str) -> dict | None:
     return json.loads(path.read_text())
 
 
-def create_state(branch: str, issue_key: str, repo_path: str | None = None) -> dict:
+def create_state(
+    branch: str,
+    issue_key: str,
+    repo_path: str | None = None,
+    repos: list[dict] | None = None,
+) -> dict:
     """Create an initial pipeline state for a new ticket.
+
+    Either ``repo_path`` (single-repo ticket) or ``repos`` (multi-repo) must
+    be provided. When ``repos`` is given, the state record's ``repos`` field
+    is populated with per-repo sub-state tracking; the top-level
+    ``repoPath`` convenience field mirrors ``repos[0]["path"]`` for
+    backward-compatible dashboard display.
 
     The state starts at "analyzing" with reworkCount=0.
 
     Args:
-        branch: Git branch name (e.g. "ev-14942_fix_xss").
+        branch: Feature branch name (reused across all repos in multi-repo mode).
         issue_key: Ticket identifier (e.g. "EV-14942").
-        repo_path: Absolute path to the target repo directory (optional).
+        repo_path: Absolute path to the repo (single-repo mode). Ignored
+            when ``repos`` is provided.
+        repos: List of ``{"name", "path"}`` dicts (multi-repo mode). Each
+            entry is expanded to
+            ``{"name", "path", "state": "pending", "prId": None, "mrUrl": None, "error": None}``.
 
     Returns:
         The newly created state dict.
+
+    Raises:
+        ValueError: If neither ``repo_path`` nor ``repos`` is provided.
     """
+    if repos is None and repo_path is None:
+        raise ValueError("create_state requires either repo_path or repos")
+
+    # Normalise: always produce repos[] internally. Single-repo mode
+    # converts repo_path to a one-element list.
+    if repos is None:
+        repos = [{"name": Path(repo_path).name, "path": repo_path}]
+
+    normalised_repos = [
+        {
+            "name": r["name"],
+            "path": r["path"],
+            "state": "pending",
+            "prId": None,
+            "mrUrl": None,
+            "error": None,
+        }
+        for r in repos
+    ]
+
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     now = datetime.now(timezone.utc).isoformat()
     state = {
@@ -93,12 +159,14 @@ def create_state(branch: str, issue_key: str, repo_path: str | None = None) -> d
         "createdAt": now,
         "updatedAt": now,
         "reworkCount": 0,
-        "repoPath": repo_path,
+        "repoPath": normalised_repos[0]["path"],
+        "repos": normalised_repos,
         "error": None,
         "phases": [],
         "artifacts": {},
     }
-    _state_path(branch).write_text(json.dumps(state, indent=2))
+    _atomic_write(branch, state)
+    logger.info(f"Created state for {branch} with {len(normalised_repos)} repo(s)")
     return state
 
 
@@ -138,7 +206,7 @@ def transition_state(branch: str, new_state: str, error: dict | None = None) -> 
     if error:
         current["error"] = {**error, "timestamp": now}
 
-    _state_path(branch).write_text(json.dumps(current, indent=2))
+    _atomic_write(branch, current)
     return current
 
 
@@ -168,7 +236,7 @@ def record_phase_start(branch: str, phase: str, agent: str) -> dict:
     })
     current["phases"] = phases
     current["updatedAt"] = datetime.now(timezone.utc).isoformat()
-    _state_path(branch).write_text(json.dumps(current, indent=2))
+    _atomic_write(branch, current)
     return current
 
 
@@ -197,7 +265,7 @@ def record_phase_end(branch: str, exit_code: int, result: str) -> dict:
         phases[-1]["result"] = result
     current["phases"] = phases
     current["updatedAt"] = datetime.now(timezone.utc).isoformat()
-    _state_path(branch).write_text(json.dumps(current, indent=2))
+    _atomic_write(branch, current)
     return current
 
 
@@ -216,8 +284,78 @@ def update_state_repo_path(branch: str, repo_path: str) -> None:
     if not current:
         return
     current["repoPath"] = repo_path
+    # Keep repos[0]["path"] in sync for single-repo flow (the only path
+    # that ever re-resolves mid-flight via the repo-picker).
+    repos = current.get("repos") or []
+    if repos:
+        repos[0]["path"] = repo_path
     current["updatedAt"] = datetime.now(timezone.utc).isoformat()
-    _state_path(branch).write_text(json.dumps(current, indent=2))
+    _atomic_write(branch, current)
+
+
+def update_repo_sub_state(
+    branch: str,
+    repo_name: str,
+    new_sub_state: str,
+    **extra,
+) -> dict | None:
+    """Update one entry in ``state["repos"][]`` atomically.
+
+    Args:
+        branch: Feature branch name.
+        repo_name: Value of the ``name`` field on the repo entry to update.
+        new_sub_state: New sub-state for this repo (e.g. "analyzing",
+            "developing", "completed", "failed", "reworking").
+        **extra: Additional fields to set on the entry (e.g. ``prId=123``,
+            ``mrUrl="..."``, ``error="git push failed"``).
+
+    Returns:
+        The updated state dict, or None if the state or repo was not found.
+    """
+    state = get_state(branch)
+    if not state:
+        return None
+
+    repos = state.get("repos") or []
+    match = next((r for r in repos if r.get("name") == repo_name), None)
+    if not match:
+        logger.warning(f"update_repo_sub_state: no repo named {repo_name!r} in {branch}")
+        return None
+
+    match["state"] = new_sub_state
+    for key, value in extra.items():
+        match[key] = value
+
+    # Keep top-level shortcuts in sync when the first repo changes
+    if repos and repos[0].get("name") == repo_name:
+        if "prId" in extra:
+            state["prId"] = extra["prId"]
+        if "mrUrl" in extra:
+            state["mrUrl"] = extra["mrUrl"]
+
+    state["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    _atomic_write(branch, state)
+    return state
+
+
+def find_repo_by_pr_id(state: dict, pr_id) -> dict | None:
+    """Find the repo entry that owns a given PR/MR id.
+
+    Args:
+        state: A state dict (as returned by ``get_state``).
+        pr_id: The PR/MR id to look up (usually an int, but string-safe).
+
+    Returns:
+        The matching ``{"name", "path", "state", "prId", "mrUrl", ...}``
+        dict, or None if no repo in this state owns that PR id.
+    """
+    if not state:
+        return None
+    for repo in state.get("repos") or []:
+        # Compare as-is AND as string to handle int/str drift.
+        if repo.get("prId") == pr_id or str(repo.get("prId")) == str(pr_id):
+            return repo
+    return None
 
 
 def update_artifacts(branch: str, **kwargs) -> dict:
@@ -238,7 +376,7 @@ def update_artifacts(branch: str, **kwargs) -> dict:
     artifacts.update(kwargs)
     current["artifacts"] = artifacts
     current["updatedAt"] = datetime.now(timezone.utc).isoformat()
-    _state_path(branch).write_text(json.dumps(current, indent=2))
+    _atomic_write(branch, current)
     return current
 
 
