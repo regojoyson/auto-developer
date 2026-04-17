@@ -32,37 +32,116 @@ class ClaudeCodeAdapter(CliAdapterBase):
     config_dir = ".claude"
     rules_file_name = "CLAUDE.md"
 
-    def build_args(self, agent_name, input_text, config):
+    def build_args(self, agent_name, input_text, config, phase_scope=None):
         """Build command-line arguments for a Claude Code agent invocation.
 
+        When ``phase_scope`` is provided, translates it into Claude Code's
+        native flags (``--allowed-tools``, ``--disallowed-tools``,
+        ``--mcp-config``, ``--max-turns``) and drops
+        ``--dangerously-skip-permissions`` so the allow/deny lists are
+        actually enforced.
+
         Args:
-            agent_name: Name of the agent to invoke (e.g. ``"orchestrator"``).
+            agent_name: Name of the agent to invoke (e.g. ``"analyze"``).
             input_text: JSON-encoded input string to pass to the agent.
             config: The ``cli_adapter`` section from config.yaml. Supports
                 optional keys ``model``, ``fallback_model``, ``max_turns``,
                 and ``extra_args``.
+            phase_scope: Optional :class:`PhaseScope` to restrict tools.
 
         Returns:
             list[str]: CLI argument strings suitable for subprocess execution.
         """
         args = [
             "--agent", agent_name,
-            "--print",                              # non-interactive
-            "--output-format", "stream-json",       # one JSON event per line
-            "--verbose",                            # required with stream-json
-            "--dangerously-skip-permissions",       # auto-approve all tool calls
-            "--disable-slash-commands",             # agent must not invoke skills
-            "--no-session-persistence",             # ephemeral CI runs
+            "--print",
+            "--output-format", "stream-json",
+            "--verbose",
+            "--disable-slash-commands",
+            "--no-session-persistence",
         ]
+
+        if phase_scope is None:
+            # Legacy path: bypass permissions as before.
+            args.append("--dangerously-skip-permissions")
+        else:
+            # Scoped path: rely on allow/deny for permission control.
+            args.extend(self._phase_scope_args(phase_scope))
+
         if config.get("model"):
             args.extend(["--model", config["model"]])
         if config.get("fallback_model"):
             args.extend(["--fallback-model", config["fallback_model"]])
-        max_turns = config.get("max_turns") or DEFAULT_MAX_TURNS
+
+        max_turns = (
+            (phase_scope.max_turns if phase_scope and phase_scope.max_turns else None)
+            or config.get("max_turns")
+            or DEFAULT_MAX_TURNS
+        )
         args.extend(["--max-turns", str(max_turns)])
+
         args.extend(config.get("extra_args") or [])
-        args.append(input_text)                     # prompt positional, must be last
+        args.append(input_text)
         return args
+
+    def _phase_scope_args(self, scope):
+        """Render a PhaseScope into Claude Code CLI flags.
+
+        Writes a temp ``mcp-config.json`` when ``allowed_mcp_servers`` is an
+        explicit tuple; the file is NOT cleaned up here (the runner's
+        TemporaryDirectory scope owns its lifetime).
+        """
+        import json
+        import tempfile
+        from pathlib import Path
+
+        args = []
+
+        if scope.allowed_tools is not None:
+            args.extend(["--allowed-tools", ",".join(scope.allowed_tools)])
+
+        # Treat allowed_subagents=() as "also disallow Task".
+        disallowed = list(scope.disallowed_tools or ())
+        if scope.allowed_subagents == () and "Task" not in disallowed:
+            disallowed.append("Task")
+        if disallowed:
+            args.extend(["--disallowed-tools", ",".join(disallowed)])
+
+        if scope.allowed_mcp_servers is not None:
+            # Build a filtered mcp-config pointing only at the allowed servers.
+            tmp_dir = Path(tempfile.mkdtemp(prefix="auto-pilot-mcp-"))
+            mcp_path = tmp_dir / "mcp-config.json"
+            mcp_path.write_text(
+                json.dumps({"mcpServers": self._filter_mcp_servers(scope.allowed_mcp_servers)})
+            )
+            args.extend(["--mcp-config", str(mcp_path)])
+
+        return args
+
+    def _filter_mcp_servers(self, allowed):
+        """Return a dict of {name: server-config} for each allowed server.
+
+        Reads the current project's ``.claude/settings.json`` to discover
+        declared MCP servers and keeps only those whose name appears in
+        ``allowed``. Returns an empty dict if the settings file is missing
+        or no servers match.
+        """
+        import json
+        from pathlib import Path
+
+        if not allowed:
+            return {}
+
+        settings_path = Path(".claude/settings.json")
+        if not settings_path.exists():
+            return {}
+        try:
+            settings = json.loads(settings_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+        declared = settings.get("mcpServers", {}) or {}
+        return {name: cfg for name, cfg in declared.items() if name in allowed}
 
     def format_stream_line(self, line):
         """Render a stream-json event as a concise human-readable line.
