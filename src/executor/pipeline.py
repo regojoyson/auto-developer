@@ -128,7 +128,21 @@ def _prepare_repo_for_branch(repo_dir, base_branch, feature_branch=None):
 
 def _log_phase(issue_key, phase_label, message):
     """Log a phase message to both the logger and the output handlers (dashboard)."""
-    display = PHASE_NAMES.get(phase_label, phase_label)
+    display = PHASE_NAMES.get(phase_label)
+    if not display:
+        # Dynamic per-repo label: "phase:<repo>:<action>"
+        parts = phase_label.split(":")
+        if len(parts) == 3 and parts[0] == "phase":
+            repo, action = parts[1], parts[2]
+            pretty_action = {
+                "analyze": "Analyze",
+                "plan": "Plan",
+                "implement": "Implement",
+                "rework": "Rework",
+            }.get(action, action.title())
+            display = f"{pretty_action} ({repo})"
+        else:
+            display = phase_label
     formatted = f"[{display}] {message}"
     logger.info(f"{issue_key}: {formatted}")
 
@@ -308,6 +322,170 @@ def _run_phase(
     return result
 
 
+def _run_repo_phase(
+    issue_key, branch, agent_name, phase_label,
+    input_data, statuses, repo_dir, *, phase_scope=None,
+):
+    """Run a single phase for a single repo in fan-out mode.
+
+    Unlike ``_run_phase``, this does NOT transition the overall pipeline
+    to "failed" on per-repo agent errors — the caller is responsible for
+    recording the failure on the per-repo sub-state.
+    """
+    _log_phase(issue_key, phase_label, "Starting...")
+    try:
+        result = run_agent(
+            agent_name, input_data,
+            cwd=repo_dir, issue_key=issue_key,
+            phase_scope=phase_scope,
+        )
+    except Exception as e:
+        _log_phase(issue_key, phase_label, f"EXCEPTION — {e}")
+        return None
+
+    if not result.get("success"):
+        _log_phase(issue_key, phase_label, f"FAILED — exit={result.get('exit_code')} err={result.get('error')}")
+        return None
+
+    if _is_blocked(result):
+        reason = _extract_blocked_reason(result)
+        _log_phase(issue_key, phase_label, f"BLOCKED — {reason}")
+        return None
+
+    _log_phase(issue_key, phase_label, "Completed successfully")
+    return result
+
+
+# ─── Per-Repo Pipeline ──────────────────────────────────
+
+def _run_pipeline_for_repo(
+    issue_key, branch, base_branch, summary, statuses,
+    repo_name, repo_dir, ticket_data, api_mode,
+) -> dict:
+    """Run analyze → plan → implement → push → create MR for ONE repo.
+
+    Updates per-repo sub-state in the shared state record via
+    ``update_repo_sub_state``. Catches per-repo failures and returns a
+    summary dict (does NOT transition the overall pipeline to "failed").
+
+    Returns:
+        Dict with keys:
+            success: bool — all three phases + push + MR creation succeeded
+            prId: int | None
+            mrUrl: str | None
+            error: str | None
+    """
+    from src.state.manager import update_repo_sub_state
+    import os as _os
+
+    try:
+        # Prepare repo on base branch (fresh checkout)
+        update_repo_sub_state(branch, repo_name, "preparing")
+        _prepare_repo_for_branch(repo_dir, base_branch)
+
+        # Build git-provider API client scoped to THIS repo
+        git_adapter, _ = get_git_provider()
+        git_api = git_adapter.create_api(dict(_os.environ), repo_dir=repo_dir)
+
+        # Create the remote branch for this repo
+        create_remote_branch(git_api, branch=branch, base=base_branch)
+
+        # ── Phase 1 — Analyze ───────────────────────────
+        update_repo_sub_state(branch, repo_name, "analyzing")
+        analyze_payload = {
+            "issueKey": issue_key,
+            "branch": branch,
+            "summary": summary,
+            "baseBranch": base_branch,
+            "statuses": statuses,
+            "apiMode": api_mode,
+            "repo": repo_name,  # hint to the agent that this is one of N
+        }
+        if ticket_data:
+            analyze_payload["ticketData"] = ticket_data
+        result = _run_repo_phase(
+            issue_key, branch, "analyze",
+            f"phase:{repo_name}:analyze",
+            json.dumps(analyze_payload), statuses, repo_dir,
+            phase_scope=ANALYZE_SCOPE,
+        )
+        if result is None:
+            raise RuntimeError("analyze phase failed or blocked")
+
+        commit_local_file_via_api(
+            git_api, repo_dir=repo_dir, branch=branch,
+            file_path="TICKET.md",
+            message=f"docs({issue_key}): add ticket context",
+        )
+
+        # ── Phase 2 — Plan ──────────────────────────────
+        update_repo_sub_state(branch, repo_name, "planning")
+        plan_input = json.dumps({
+            "issueKey": issue_key,
+            "branch": branch,
+            "repo": repo_name,
+        })
+        result = _run_repo_phase(
+            issue_key, branch, "plan",
+            f"phase:{repo_name}:plan",
+            plan_input, statuses, repo_dir,
+            phase_scope=PLAN_SCOPE,
+        )
+        if result is None:
+            raise RuntimeError("plan phase failed or blocked")
+
+        commit_local_file_via_api(
+            git_api, repo_dir=repo_dir, branch=branch,
+            file_path="PLAN.md",
+            message=f"docs({issue_key}): add implementation plan",
+        )
+
+        # ── Phase 3 — Implement ─────────────────────────
+        update_repo_sub_state(branch, repo_name, "developing")
+        _prepare_repo_for_branch(repo_dir, base_branch, feature_branch=branch)
+        implement_input = json.dumps({
+            "issueKey": issue_key,
+            "branch": branch,
+            "repo": repo_name,
+        })
+        result = _run_repo_phase(
+            issue_key, branch, "implement",
+            f"phase:{repo_name}:implement",
+            implement_input, statuses, repo_dir,
+            phase_scope=IMPLEMENT_SCOPE,
+        )
+        if result is None:
+            raise RuntimeError("implement phase failed or blocked")
+
+        # Python pushes, creates MR
+        push_local_branch(repo_dir, branch)
+        mr = create_merge_request(
+            git_api,
+            source=branch,
+            target=base_branch,
+            title=f"feat({issue_key}): {summary}",
+            description=(
+                f"Ticket: {issue_key}\n\n"
+                f"Repo: {repo_name}\n\n"
+                f"See PLAN.md for the file-level change list."
+            ),
+        )
+        pr_id = mr.get("iid") or mr.get("id") or mr.get("number")
+        mr_url = mr.get("web_url") or mr.get("html_url") or mr.get("url") or "(no URL)"
+        update_repo_sub_state(
+            branch, repo_name, "completed",
+            prId=pr_id, mrUrl=mr_url,
+        )
+        _log_step(issue_key, f"[{repo_name}] MR created: {mr_url}")
+        return {"success": True, "prId": pr_id, "mrUrl": mr_url, "error": None}
+
+    except Exception as e:
+        err = str(e)
+        _log_step(issue_key, f"[{repo_name}] failed: {err}")
+        update_repo_sub_state(branch, repo_name, "failed", error=err)
+        return {"success": False, "prId": None, "mrUrl": None, "error": err}
+
+
 # ─── Main Pipeline ──────────────────────────────────────
 
 def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, statuses, repo_dir):
@@ -345,10 +523,11 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
     # ── Step 1b: Repo selection (parentDir mode only) ────
     # If config is parentDir AND no component was provided AND no default is
     # set, then repo_dir currently points at the PARENT directory (no git
-    # inside). Invoke the repo-picker agent to choose the right sub-repo.
+    # inside). Invoke the repo-picker agent to choose the right sub-repo(s).
     ticket_data = None
+    picker_ticket_data = None
+    from pathlib import Path as _Path
     if app_config["repo"]["mode"] == "parentDir" and not _os_path_has_git(repo_dir):
-        from pathlib import Path as _Path
         parent = _Path(repo_dir)
         candidates = [
             d.name for d in sorted(parent.iterdir())
@@ -364,15 +543,17 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
 
         # Read the full ticket now (same as api-mode read_ticket below) so the
         # picker has something to work with.
-        picker_ticket = None
-        try:
-            adapter_tmp, _ = get_issue_tracker()
-            picker_ticket = adapter_tmp.read_issue(issue_key)
-            # Cache for later so Step 3 (API mode) doesn't need to re-read.
-            ticket_data = picker_ticket
-        except Exception as e:
-            logger.warning(f"{issue_key}: could not read ticket for picker — {e}")
-            picker_ticket = {"summary": summary, "description": ""}
+        picker_ticket = ticket_data
+        if picker_ticket is None:
+            try:
+                adapter_tmp, _ = get_issue_tracker()
+                picker_ticket = adapter_tmp.read_issue(issue_key)
+                # Cache for later so Step 3 (API mode) doesn't need to re-read.
+                ticket_data = picker_ticket
+            except Exception as e:
+                logger.warning(f"{issue_key}: could not read ticket for picker — {e}")
+                picker_ticket = {"summary": summary, "description": ""}
+        picker_ticket_data = picker_ticket  # reused below
 
         picker_input = json.dumps({
             "issueKey": issue_key,
@@ -393,32 +574,54 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
             return  # blocked / failed — already handled by _run_phase
 
         pipeline_result = _extract_pipeline_result(picker_result.get("output", ""))
-        chosen = pipeline_result and pipeline_result.get("repo")
-        if not chosen or chosen not in candidates:
-            _log_step(issue_key, f"CRITICAL: picker returned invalid repo: {chosen!r}")
+        # Accept new list format OR legacy single-repo format for safety.
+        chosen_repos = None
+        if pipeline_result:
+            if isinstance(pipeline_result.get("repos"), list):
+                chosen_repos = [r for r in pipeline_result["repos"] if r in candidates]
+            elif pipeline_result.get("repo") in candidates:
+                chosen_repos = [pipeline_result["repo"]]
+        if not chosen_repos:
+            _log_step(issue_key, f"CRITICAL: picker returned no valid repos: {pipeline_result!r}")
             transition_state(branch, "failed", error={
                 "phase": "analyzing", "agent": "pipeline",
-                "message": f"Repo-picker returned invalid choice: {chosen!r}",
+                "message": f"Repo-picker returned no valid repo: {pipeline_result!r}",
             })
             return
 
-        repo_dir = str(parent / chosen)
-        _log_step(issue_key, f"Picker chose sub-repo: {chosen}")
-        # Re-prepare the now-real repo on base_branch
-        _prepare_repo_for_branch(repo_dir, base_branch)
+        _log_step(issue_key, f"Picker chose: {chosen_repos}")
+        from src.state.manager import set_state_repos
+        set_state_repos(branch, [
+            {"name": name, "path": str(parent / name)} for name in chosen_repos
+        ])
+        # Keep repo_dir as a reasonable default (first picked repo) in case
+        # anything downstream still reads it.
+        repo_dir = str(parent / chosen_repos[0])
 
-        # Update the state record so dashboard/cancel/delete see the real path
+    # If we skipped the picker (component was supplied OR mode != parentDir),
+    # ensure state.repos reflects the single repo we'll work on.
+    _ensure_state = get_state(branch)
+    if _ensure_state and not _ensure_state.get("repos"):
+        from src.state.manager import set_state_repos
+        set_state_repos(branch, [{
+            "name": _Path(repo_dir).name,
+            "path": repo_dir,
+        }])
+
+    # ── Read ticket once (used by all repos) ────────────
+    if ticket_data is None and picker_ticket_data is not None:
+        ticket_data = picker_ticket_data
+    if ticket_data is None and is_api_mode():
         try:
-            from src.state.manager import update_state_repo_path
-            update_state_repo_path(branch, repo_dir)
-        except ImportError:
-            # If no such helper exists, that's fine — state.json will just have
-            # the parent path until the next run. Best-effort.
-            pass
+            adapter_tmp, _ = get_issue_tracker()
+            ticket_data = adapter_tmp.read_issue(issue_key)
+            _log_step(issue_key, f"Ticket read: {ticket_data.get('summary', '')}")
+        except Exception as e:
+            logger.warning(f"{issue_key}: could not read ticket — {e}")
+            ticket_data = None
 
-    # ── Step 2: Transition ticket to Development ─────────
+    # ── Transition ticket to Development (once) ─────────
     if is_api_mode():
-        # API mode — Python server transitions (CRITICAL — pipeline stops on failure)
         _log_step(issue_key, f"Transitioning ticket to '{statuses['development']}' (via REST API)...")
         try:
             adapter, _ = get_issue_tracker()
@@ -438,183 +641,58 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
     else:
         _log_step(issue_key, "Ticket transition will be handled by agent via MCP")
 
-    # ── Step 3: Read ticket (API mode only) ──────────────
-    # ticket_data may already be set from the picker step above.
-    if is_api_mode() and ticket_data is None:
-        _log_step(issue_key, "Reading ticket details via REST API...")
-        try:
-            adapter, _ = get_issue_tracker()
-            ticket_data = adapter.read_issue(issue_key)
-            _log_step(issue_key, f"Ticket read: {ticket_data.get('summary', '')}")
-        except Exception as e:
-            error_msg = str(e)
-            _log_step(issue_key, f"CRITICAL: Failed to read ticket — {error_msg}")
-            transition_state(branch, "failed", error={
-                "phase": "analyzing",
-                "agent": "pipeline",
-                "message": f"Failed to read ticket: {error_msg}",
-            })
-            return
-
-    # ── Step 4: Phase 1 — Analyze ────────────────────────
-    # Agent writes TICKET.md to repo_dir locally. Python creates the
-    # remote branch and commits TICKET.md via the git-provider API.
-    _log_step(issue_key, "Preparing git-provider API client...")
-    git_adapter, _git_config = get_git_provider()
-    import os as _os
-    git_api = git_adapter.create_api(dict(_os.environ), repo_dir=repo_dir)
-
-    _log_step(issue_key, f"Creating remote branch {branch} from {base_branch}...")
-    try:
-        create_remote_branch(git_api, branch=branch, base=base_branch)
-    except Exception as e:
-        _log_step(issue_key, f"CRITICAL: remote branch creation failed — {e}")
-        transition_state(branch, "failed", error={
-            "phase": "analyzing", "agent": "pipeline",
-            "message": f"Failed to create remote branch: {e}",
-        })
-        _try_notify_slack(f"{issue_key} pipeline failed — branch creation error")
-        return
-
+    # ── Fan out: one full pipeline per chosen repo ──────
     api_mode = app_config["issue_tracker"]["api_mode"]
-    analyze_payload = {
-        "issueKey": issue_key,
-        "branch": branch,
-        "summary": summary,
-        "projectKey": project_key,
-        "baseBranch": base_branch,
-        "statuses": statuses,
-        "apiMode": api_mode,
-    }
-    if ticket_data:
-        analyze_payload["ticketData"] = ticket_data
-    analyze_input = json.dumps(analyze_payload)
+    current_state = get_state(branch)
+    repos = (current_state.get("repos") if current_state else None) or []
+    _log_step(issue_key, f"Fanning out across {len(repos)} repo(s): {[r['name'] for r in repos]}")
 
-    result = _run_phase(
-        issue_key, branch, "analyze", "phase:analyze",
-        analyze_input, statuses, repo_dir,
-        phase_scope=ANALYZE_SCOPE,
-    )
-    if result is None:
-        return
+    # Branch-level state is coarse — flip it ONCE at the start of the fan-out.
+    # Per-repo granular state lives in state.repos[i].state.
+    if current_state and current_state.get("state") == "analyzing":
+        transition_state(branch, "planning")
+        transition_state(branch, "developing")
 
-    # Python commits the agent-produced TICKET.md via the git-provider API.
-    try:
-        commit_local_file_via_api(
-            git_api,
-            repo_dir=repo_dir,
-            branch=branch,
-            file_path="TICKET.md",
-            message=f"docs({issue_key}): add ticket context",
+    results = []
+    for repo_entry in repos:
+        repo_name = repo_entry["name"]
+        repo_dir_i = repo_entry["path"]
+
+        result = _run_pipeline_for_repo(
+            issue_key, branch, base_branch, summary, statuses,
+            repo_name, repo_dir_i, ticket_data, api_mode,
         )
-    except Exception as e:
-        _log_step(issue_key, f"CRITICAL: failed to commit TICKET.md — {e}")
-        transition_state(branch, "failed", error={
-            "phase": "analyzing", "agent": "pipeline",
-            "message": f"Failed to commit TICKET.md: {e}",
-        })
-        return
+        results.append({"name": repo_name, **result})
 
-    _try_add_comment(issue_key, f"Analysis complete for {issue_key}. See TICKET.md on branch `{branch}`.")
+    # ── Summary comment + final transitions ─────────────
+    ok_repos = [r for r in results if r["success"]]
+    err_repos = [r for r in results if not r["success"]]
 
-    # ── Step 5: Phase 2 — Plan ───────────────────────────
-    _log_step(issue_key, "Transitioning state: analyzing → planning")
-    transition_state(branch, "planning")
-
-    plan_input = json.dumps({
-        "issueKey": issue_key,
-        "branch": branch,
-    })
-    result = _run_phase(
-        issue_key, branch, "plan", "phase:plan",
-        plan_input, statuses, repo_dir,
-        phase_scope=PLAN_SCOPE,
-    )
-    if result is None:
-        return
-
-    # Python commits the agent-produced PLAN.md via the git-provider API.
-    try:
-        commit_local_file_via_api(
-            git_api,
-            repo_dir=repo_dir,
-            branch=branch,
-            file_path="PLAN.md",
-            message=f"docs({issue_key}): add implementation plan",
+    if ok_repos:
+        lines = [f"Implementation complete for {issue_key}.", ""]
+        for r in ok_repos:
+            lines.append(f"- **{r['name']}**: {r['mrUrl']}")
+        if err_repos:
+            lines.append("")
+            lines.append("Failed:")
+            for r in err_repos:
+                lines.append(f"- **{r['name']}**: {r['error']}")
+        _try_add_comment(issue_key, "\n".join(lines))
+        _try_notify_slack(
+            f"MRs created for {issue_key}: " +
+            ", ".join(r["mrUrl"] for r in ok_repos)
         )
-    except Exception as e:
-        _log_step(issue_key, f"CRITICAL: failed to commit PLAN.md — {e}")
-        transition_state(branch, "failed", error={
-            "phase": "planning", "agent": "pipeline",
-            "message": f"Failed to commit PLAN.md: {e}",
-        })
-        return
-
-    _try_add_comment(issue_key, f"Plan written for {issue_key}. See PLAN.md on branch `{branch}`.")
-
-    # ── Step 6: Phase 3 — Implement ─────────────────────
-    _log_step(issue_key, "Transitioning state: planning → developing")
-    transition_state(branch, "developing")
-    _log_step(issue_key, f"Checking out feature branch {branch} for implementation...")
-    _prepare_repo_for_branch(repo_dir, base_branch, feature_branch=branch)
-
-    implement_input = json.dumps({
-        "issueKey": issue_key,
-        "branch": branch,
-    })
-    result = _run_phase(
-        issue_key, branch, "implement", "phase:implement",
-        implement_input, statuses, repo_dir,
-        phase_scope=IMPLEMENT_SCOPE,
-    )
-    if result is None:
-        return
-
-    # Python pushes the branch (agent committed locally but cannot push).
-    _log_step(issue_key, f"Pushing {branch} to origin...")
-    try:
-        push_local_branch(repo_dir, branch)
-    except Exception as e:
-        _log_step(issue_key, f"CRITICAL: git push failed — {e}")
+        _try_transition_issue(issue_key, statuses["done"])
+        transition_state(branch, "awaiting-review")
+        logger.info(f"  PIPELINE COMPLETED: {issue_key} — {len(ok_repos)} MR(s), {len(err_repos)} failure(s)")
+    else:
+        error_summary = "; ".join(f"{r['name']}: {r['error']}" for r in err_repos) or "no MRs created"
+        _try_add_comment(issue_key, f"Pipeline failed for {issue_key}. Errors: {error_summary}")
+        _try_notify_slack(f"{issue_key} pipeline failed: {error_summary}")
         transition_state(branch, "failed", error={
             "phase": "developing", "agent": "pipeline",
-            "message": f"git push failed: {e}",
+            "message": error_summary,
         })
-        return
-
-    # Python creates the MR via git-provider API.
-    _log_step(issue_key, "Creating merge/pull request...")
-    try:
-        mr = create_merge_request(
-            git_api,
-            source=branch,
-            target=base_branch,
-            title=f"feat({issue_key}): {summary}",
-            description=f"Ticket: {issue_key}\n\nSee PLAN.md for the file-level change list.",
-        )
-        mr_url = mr.get("web_url") or mr.get("html_url") or mr.get("url") or "(no URL returned)"
-    except Exception as e:
-        _log_step(issue_key, f"CRITICAL: MR creation failed — {e}")
-        transition_state(branch, "failed", error={
-            "phase": "developing", "agent": "pipeline",
-            "message": f"MR creation failed: {e}",
-        })
-        return
-
-    # ── Step 7: Complete — awaiting review ───────────────
-    _log_step(issue_key, "Transitioning state: developing → awaiting-review")
-    transition_state(branch, "awaiting-review")
-    _log_step(issue_key, f"Transitioning ticket to '{statuses['done']}'...")
-    _try_transition_issue(issue_key, statuses["done"])
-    _try_add_comment(issue_key, f"Implementation complete for {issue_key}. MR: {mr_url}")
-    _try_notify_slack(f"MR created for {issue_key}: {mr_url}")
-
-    logger.info(f"\n{'='*60}")
-    logger.info(f"  PIPELINE COMPLETED: {issue_key}")
-    logger.info(f"  State: awaiting-review")
-    logger.info(f"  Branch: {branch}")
-    logger.info(f"  MR: {mr_url}")
-    logger.info(f"{'='*60}\n")
 
 
 # ─── Rework Pipeline ───────────────────────────────────

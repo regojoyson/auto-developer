@@ -338,6 +338,43 @@ def update_repo_sub_state(
     return state
 
 
+def set_state_repos(branch: str, repos: list[dict]) -> dict | None:
+    """Replace the ``repos`` array on an existing state record.
+
+    Used when the pipeline's picker resolves the list of affected repos
+    AFTER initial state creation (which only has a placeholder repo_path).
+
+    Args:
+        branch: Feature branch name.
+        repos: List of ``{"name", "path"}`` dicts. Each entry is expanded
+            to ``{"name", "path", "state": "pending", "prId": None,
+            "mrUrl": None, "error": None}``.
+
+    Returns:
+        The updated state dict, or None if no state record exists for
+        the branch.
+    """
+    state = get_state(branch)
+    if not state:
+        return None
+    normalised = [
+        {
+            "name": r["name"],
+            "path": r["path"],
+            "state": "pending",
+            "prId": None,
+            "mrUrl": None,
+            "error": None,
+        }
+        for r in repos
+    ]
+    state["repos"] = normalised
+    state["repoPath"] = normalised[0]["path"] if normalised else state.get("repoPath")
+    state["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    _atomic_write(branch, state)
+    return state
+
+
 def find_repo_by_pr_id(state: dict, pr_id) -> dict | None:
     """Find the repo entry that owns a given PR/MR id.
 
