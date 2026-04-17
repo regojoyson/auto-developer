@@ -1,8 +1,7 @@
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import PipelineList from './components/PipelineList';
 import PipelineDetail from './components/PipelineDetail';
-import Logs from './components/Logs';
 import TriggerForm from './components/TriggerForm';
 import { ToastProvider } from './components/ToastContext';
 
@@ -18,7 +17,8 @@ export default function App() {
                 <Route path="/" element={<PipelineList />} />
                 <Route path="/trigger" element={<TriggerForm />} />
                 <Route path="/pipeline/:issueKey" element={<PipelineDetail />} />
-                <Route path="/logs/:issueKey" element={<Logs />} />
+                {/* Back-compat redirect for old /logs/:issueKey URLs */}
+                <Route path="/logs/:issueKey" element={<Navigate to="/pipeline/:issueKey" replace />} />
               </Routes>
             </div>
           </main>

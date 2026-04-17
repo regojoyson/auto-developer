@@ -103,12 +103,9 @@ export default function PipelineList() {
                 <td className="text-sm text-gray-500">{formatDate(p.updatedAt)}</td>
                 <td className="text-center">{p.reworkCount || 0}</td>
                 <td>
-                  <div className="flex gap-2">
+                  <div className="flex gap-3">
                     <Link to={`/pipeline/${p.issueKey}`} className="text-blue-600 hover:text-blue-800 text-sm font-medium">
-                      View
-                    </Link>
-                    <Link to={`/logs/${p.issueKey}`} className="text-indigo-600 hover:text-indigo-800 text-sm font-medium">
-                      Logs
+                      Open
                     </Link>
                     <button onClick={() => handleCancel(p.issueKey)} className="text-red-600 hover:text-red-800 text-sm font-medium">
                       Cancel
