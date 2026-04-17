@@ -48,7 +48,16 @@ def get_repo_dir(component: str | None = None) -> str:
     if mode == "parentDir":
         base = config["repo"]["path"]
         if not component:
-            return base
+            default = config["repo"].get("default_component") or config["repo"].get("defaultComponent")
+            if default:
+                component = default
+                logger.info(f"No component on ticket; falling back to default_component='{default}'")
+            else:
+                raise ValueError(
+                    "parentDir mode requires a component to select a repo, but none was provided. "
+                    "Either set a component on the ticket, or configure "
+                    "repo.defaultComponent in config.yaml."
+                )
         return str(Path(base) / component)
 
     if mode == "clone":

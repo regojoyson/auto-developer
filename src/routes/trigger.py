@@ -75,7 +75,14 @@ async def manual_trigger(body: TriggerRequest):
     if get_state(branch):
         return {"error": "Pipeline already active for this ticket", "branch": branch}
 
-    repo_dir = get_repo_dir(component)
+    try:
+        repo_dir = get_repo_dir(component)
+    except ValueError as e:
+        logger.warning(f"{issue_key}: cannot select repo — {e}")
+        # Best-effort: tell the human what went wrong.
+        from src.executor.pipeline import try_add_comment
+        try_add_comment(issue_key, f"Pipeline could not start: {e}")
+        return {"accepted": False, "issueKey": issue_key, "reason": str(e)}
     logger.info(f"Manual trigger: {issue_key}", extra={"branch": branch, "repo_dir": repo_dir})
 
     prepare_repo(repo_dir)
