@@ -158,7 +158,7 @@ Note: Slack escalation notification is handled by the Python pipeline server.
 - **All decisions are self-driven and auto-approved** — never present options and wait for selection. You choose the best path and execute it.
 - **ALWAYS output a __PIPELINE_RESULT__ line at the end of every action** — the pipeline depends on it.
 - **DO NOT transition ticket status** (e.g. to Development, Done, Blocked) — the Python pipeline server handles all status transitions automatically. You only post comments and create branches/MRs.
-- **DO NOT send Slack notifications** — the Python pipeline server sends notifications only when Slack is enabled in config. You only post comments on the ticket.
+- **DO NOT send any Slack messages or notifications.** Do NOT call `slack_send_message`, `slack_post_message`, or any Slack tool. Even if Slack MCP tools are available to you, they are forbidden. Your only output channels are: (1) issue tracker comments, (2) stdout logs. The pipeline will handle notifications if configured to do so — not you.
 - **DO push the branch** after committing code — use `git push origin <branch>` to ensure commits are on the remote before creating MR/PR.
 
 **If any step fails:** log the error, skip to the next step, and continue. Do not stop the pipeline. Still output the __PIPELINE_RESULT__ line at the end.

@@ -43,6 +43,13 @@ SKILLS_DISABLED_PREAMBLE = (
     "You are a pipeline agent — follow ONLY the steps defined in your agent file.\n\n"
 )
 
+NO_SLACK_PREAMBLE = (
+    "CRITICAL: Do NOT send any Slack messages or notifications. Do NOT call slack_send_message, "
+    "slack_post_message, or any Slack tool under any circumstances. Even if Slack MCP tools are "
+    "available to you, they are forbidden. Your only output channels are: "
+    "(1) the issue tracker comments, (2) stdout logs.\n\n"
+)
+
 
 def _stream_pipe(pipe, issue_key: str, agent_name: str, stream_name: str, handlers, lines: list):
     """Read lines from a pipe and fan out to handlers.
@@ -92,9 +99,13 @@ def run_agent(
     timeout = (timeout_ms or config["pipeline"]["agent_timeout"]) / 1000
     command = cli_config.get("command") or adapter.default_command
     allow_skills = config.get("pipeline", {}).get("allow_cli_skills", False)
+    notif_enabled = bool(config.get("notification"))
+
     preamble = AUTONOMY_PREAMBLE
     if not allow_skills:
         preamble += SKILLS_DISABLED_PREAMBLE
+    if not notif_enabled:
+        preamble += NO_SLACK_PREAMBLE
     prompted_input = preamble + input_text
     args = adapter.build_args(agent_name, prompted_input, cli_config)
     env = adapter.build_env({**os.environ, **(extra_env or {})}, cli_config)
