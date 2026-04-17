@@ -291,8 +291,8 @@ export default function PipelineDetail() {
         api.getLogs(issueKey, agent),
         api.getPipeline(issueKey),
       ]);
-      if (pipelineData.error) {
-        setError(pipelineData.error);
+      if (!pipelineData.state) {
+        setError(pipelineData.error || 'Pipeline not found');
       } else {
         setPipeline(pipelineData);
         setError(null);
