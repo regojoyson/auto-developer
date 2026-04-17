@@ -226,19 +226,14 @@ def ask_issue_tracker(total_steps: int, prev: dict | None = None, prev_env: dict
     p = (prev or {}).get("issueTracker", {})
     pe = prev_env or {}
     step(2, total_steps, "Issue Tracker",
-         "Where do your tickets/issues live? Choose the platform and how the pipeline talks to it.")
+         "Where do your tickets/issues live? The pipeline calls the REST API directly for reads, comments, and transitions.")
 
-    info("Two integration methods:")
-    info("  [bold]CLI MCP[/bold]  — agent reads/writes tickets through MCP tools in your AI CLI")
-    info("  [bold]Built-in API[/bold] — Python server calls the REST API directly (no MCP needed for issue tracking)")
-    console.print()
-
-    # Map old config values to new ones for backward compat
-    prev_type = p.get("type", "jira-mcp")
-    if prev_type == "jira":
-        prev_type = "jira-mcp"
-    elif prev_type == "github-issues":
-        prev_type = "github-mcp"
+    # Migrate old -mcp / -api suffixed types to the new unified value.
+    prev_type = p.get("type", "jira")
+    if prev_type in ("jira-mcp", "jira-api"):
+        prev_type = "jira"
+    elif prev_type in ("github-mcp", "github-api"):
+        prev_type = "github-issues"
 
     tracker_type = questionary.select(
         "Issue tracker:",
@@ -251,35 +246,30 @@ def ask_issue_tracker(total_steps: int, prev: dict | None = None, prev_env: dict
     env_vars = {}
     defaults = ISSUE_TRACKER_DEFAULTS[tracker_type]
 
-    is_mcp = tracker_type.endswith("-mcp")
-    is_jira = tracker_type.startswith("jira")
+    is_jira = tracker_type == "jira"
 
-    if is_mcp:
-        console.print()
-        platform = "Jira" if is_jira else "GitHub Issues"
-        info(f"[cyan]{platform} MCP[/cyan] must be configured in your AI CLI separately.")
-        info("See [cyan]docs/prerequisites.md[/cyan] for setup instructions.")
-    else:
-        console.print()
-        info("The Python server will call the REST API directly.")
-        info("API credentials are needed — they'll be saved to [cyan].env[/cyan].")
-        console.print()
-        # Ask for API credentials
-        for var_def in ISSUE_TRACKER_ENV.get(tracker_type, []):
-            prev_val = pe.get(var_def["key"], var_def["default"])
-            if var_def["secret"]:
-                hint = f" (current: {prev_val[:4]}****)" if prev_val else ""
-                value = questionary.password(f"{var_def['label']}{hint}:", style=STYLE).ask()
-                if not value and prev_val:
-                    value = prev_val
-                    info(f"  Keeping existing {var_def['key']}")
-                elif value:
-                    success(f"{var_def['key']} set (masked)")
-                else:
-                    error(f"{var_def['key']} is empty — issue tracker API calls will fail")
+    console.print()
+    info("The pipeline server uses the REST API for ticket reads, status transitions,")
+    info("and posting pipeline comments. Credentials are saved to [cyan].env[/cyan].")
+    if is_jira:
+        info("Create a token at [cyan]https://id.atlassian.com/manage-profile/security/api-tokens[/cyan]")
+    console.print()
+    # Ask for REST credentials (required for all issue trackers)
+    for var_def in ISSUE_TRACKER_ENV.get(tracker_type, []):
+        prev_val = pe.get(var_def["key"], var_def["default"])
+        if var_def["secret"]:
+            hint = f" (current: {prev_val[:4]}****)" if prev_val else ""
+            value = questionary.password(f"{var_def['label']}{hint}:", style=STYLE).ask()
+            if not value and prev_val:
+                value = prev_val
+                info(f"  Keeping existing {var_def['key']}")
+            elif value:
+                success(f"{var_def['key']} set (masked)")
             else:
-                value = questionary.text(f"{var_def['label']}:", default=prev_val, style=STYLE).ask()
-            env_vars[var_def["key"]] = value
+                error(f"{var_def['key']} is empty — issue tracker API calls will fail")
+        else:
+            value = questionary.text(f"{var_def['label']}:", default=prev_val, style=STYLE).ask()
+        env_vars[var_def["key"]] = value
 
     console.print()
     config["triggerStatus"] = questionary.text(
@@ -536,7 +526,7 @@ def show_summary(config: dict, env_vars: dict, total_steps: int):
     table.add_row("", "")
 
     tt = config["issueTracker"]["type"]
-    table.add_row("Issue tracker", f"{tt} ({'agent via MCP' if tt.endswith('-mcp') else 'built-in REST API'})")
+    table.add_row("Issue tracker", f"{tt} (REST API)")
     table.add_row("Trigger", config["issueTracker"].get("triggerStatus", ""))
     table.add_row("Development", config["issueTracker"].get("developmentStatus", ""))
     table.add_row("Done status", config["issueTracker"].get("doneStatus", ""))
@@ -726,8 +716,7 @@ def main():
     pr_label = "MRs" if git_config["type"] == "gitlab" else "PRs"
 
     tracker_type = tracker_config["type"]
-    is_tracker_mcp = tracker_type.endswith("-mcp")
-    is_jira = tracker_type.startswith("jira")
+    is_jira = tracker_type == "jira"
     tracker_platform = "Jira" if is_jira else "GitHub Issues"
 
     # ─── Integration Table ─────────────────────────────────
@@ -752,21 +741,13 @@ def main():
     )
     int_table.add_row("", "", "", "")  # spacer
 
-    # Issue tracker
-    if is_tracker_mcp:
-        int_table.add_row(
-            f"{tracker_platform} MCP",
-            "[yellow]CLI MCP[/yellow]",
-            "Read tickets, comments, transitions",
-            f"[yellow]Configure in {cli_config['type']} CLI[/yellow]\nSee docs/prerequisites.md",
-        )
-    else:
-        int_table.add_row(
-            f"{tracker_platform} API",
-            "[green]Built-in[/green]",
-            "Read tickets, comments, transitions",
-            "[dim]Credentials saved to .env[/dim]",
-        )
+    # Issue tracker — always REST API now
+    int_table.add_row(
+        f"{tracker_platform} API",
+        "[green]Built-in[/green]",
+        "Read tickets, comments, transitions",
+        "[dim]Credentials saved to .env[/dim]",
+    )
     int_table.add_row("", "", "", "")  # spacer
 
     # Slack — only if notifications enabled
@@ -789,10 +770,6 @@ def main():
         next_steps.append(f"  {step_num}. [yellow]Install {cli_config['type']}[/yellow] — '{cli_cmd}' not found")
         step_num += 1
 
-    # Only show MCP setup steps for MCP-mode integrations
-    if is_tracker_mcp:
-        next_steps.append(f"  {step_num}. Configure [cyan]{tracker_platform} MCP[/cyan] in your CLI  [dim](see table above)[/dim]")
-        step_num += 1
     if notif_config:
         next_steps.append(f"  {step_num}. Configure [cyan]Slack MCP[/cyan] in your CLI  [dim](see table above)[/dim]")
         step_num += 1

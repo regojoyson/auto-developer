@@ -27,36 +27,39 @@ CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
 
 _cache = None
 
-# Maps config type to (platform, api_mode)
+# Maps config type to platform. All types now resolve to "api" mode — agent-level
+# MCP for issue trackers is no longer supported (phase scopes deny MCP for every
+# pipeline phase, so agents can't call Jira/GitHub MCP tools anyway). The old
+# -mcp / -api suffixed values are kept as aliases for backward compatibility.
 _TRACKER_TYPE_MAP = {
-    "jira-mcp": ("jira", "mcp"),
-    "jira-api": ("jira", "api"),
-    "github-mcp": ("github-issues", "mcp"),
-    "github-api": ("github-issues", "api"),
-    # Backward compat: old type names default to mcp mode
-    "jira": ("jira", "mcp"),
-    "github-issues": ("github-issues", "mcp"),
+    "jira": "jira",
+    "github-issues": "github-issues",
+    # Deprecated aliases — resolve to the same api-mode behavior
+    "jira-mcp": "jira",
+    "jira-api": "jira",
+    "github-mcp": "github-issues",
+    "github-api": "github-issues",
 }
 
 
 def _parse_issue_tracker(raw_tracker: dict) -> dict:
     """Parse the issueTracker config section.
 
-    Handles the 4 type values (jira-mcp, jira-api, github-mcp, github-api)
-    and splits into platform + api_mode for internal use.
+    Accepts new unified type values ("jira", "github-issues") and old
+    -mcp/-api aliases for backward compatibility. All resolve to api mode.
     """
-    raw_type = raw_tracker.get("type", "jira-mcp")
+    raw_type = raw_tracker.get("type", "jira")
     if raw_type not in _TRACKER_TYPE_MAP:
         raise ValueError(
             f"Unknown issue tracker type: '{raw_type}'. "
             f"Supported: {', '.join(_TRACKER_TYPE_MAP.keys())}"
         )
-    platform, api_mode = _TRACKER_TYPE_MAP[raw_type]
+    platform = _TRACKER_TYPE_MAP[raw_type]
 
     return {
         "type": raw_type,
         "platform": platform,       # "jira" or "github-issues"
-        "api_mode": api_mode,        # "mcp" or "api"
+        "api_mode": "api",           # kept for compatibility; always "api" now
         "trigger_status": raw_tracker.get("triggerStatus", "Ready for Development"),
         "development_status": raw_tracker.get("developmentStatus", "Development"),
         "done_status": raw_tracker.get("doneStatus", "Done"),
