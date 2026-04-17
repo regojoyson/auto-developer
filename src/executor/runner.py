@@ -16,10 +16,14 @@ import os
 import subprocess
 import threading
 import time
+from typing import TYPE_CHECKING
 
 from src.config import config
 from src.providers.cli_adapter import get_cli_adapter
 from src.providers.output_handler import get_output_handlers
+
+if TYPE_CHECKING:
+    from src.executor.phase_scope import PhaseScope
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +123,7 @@ def run_agent(
     timeout_ms: int | None = None,
     extra_env: dict | None = None,
     issue_key: str | None = None,
+    phase_scope: "PhaseScope | None" = None,
 ) -> dict:
     """Invoke an agent via the configured CLI adapter with real-time output streaming.
 
@@ -148,7 +153,20 @@ def run_agent(
     if not notif_enabled:
         preamble += NO_SLACK_PREAMBLE
     prompted_input = preamble + input_text
-    args = adapter.build_args(agent_name, prompted_input, cli_config)
+    args = adapter.build_args(agent_name, prompted_input, cli_config, phase_scope=phase_scope)
+
+    # Collect any temp dirs the adapter created so we can remove them after the
+    # subprocess exits. The Claude Code adapter creates "/tmp/auto-pilot-mcp-*"
+    # dirs when a PhaseScope sets allowed_mcp_servers — we own their cleanup.
+    import shutil
+    from pathlib import Path as _Path
+    _cleanup_dirs: list[_Path] = []
+    for _i, _arg in enumerate(args):
+        if _arg == "--mcp-config" and _i + 1 < len(args):
+            _p = _Path(args[_i + 1])
+            if "auto-pilot-mcp-" in str(_p):
+                _cleanup_dirs.append(_p.parent)
+
     env = adapter.build_env({**os.environ, **(extra_env or {})}, cli_config)
     work_dir = cwd or os.getcwd()
 
@@ -228,8 +246,12 @@ def run_agent(
         finally:
             with _running_lock:
                 _running.pop(issue_key, None)
+            for _d in _cleanup_dirs:
+                shutil.rmtree(_d, ignore_errors=True)
 
     except FileNotFoundError:
         handlers.on_finish(issue_key, agent_name, -1)
         logger.error(f"CLI command not found: {command}")
+        for _d in _cleanup_dirs:
+            shutil.rmtree(_d, ignore_errors=True)
         return {"success": False, "output": "", "error": f"Command not found: {command}", "exit_code": -1}
