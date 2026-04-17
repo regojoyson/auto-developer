@@ -385,7 +385,7 @@ def ask_cli_adapter(total_steps: int, prev: dict | None = None) -> dict:
     step(4, total_steps, "AI Coding CLI",
          "Which AI coding tool should run the agents? It must be installed on this machine.")
 
-    info("The pipeline spawns this CLI to run each agent (orchestrator, brainstorm, developer, etc.)")
+    info("The pipeline spawns this CLI to run each phase agent (analyze, plan, implement, rework, feedback-parser)")
     console.print()
 
     cli_type = questionary.select(

@@ -38,7 +38,7 @@ def commit_local_file_via_api(api, *, repo_dir: str, branch: str, file_path: str
     full_path = Path(repo_dir) / file_path
     if not full_path.exists():
         raise FileNotFoundError(f"Expected {file_path} at {full_path} — agent did not write it")
-    content = full_path.read_text()
+    content = full_path.read_text(encoding="utf-8")
     api.commit_files(
         branch,
         message,
@@ -68,5 +68,6 @@ def create_merge_request(
 ) -> dict:
     """Create a PR / MR via the git-provider API. Returns the provider's response dict."""
     mr = api.create_pr(source, target, title, description)
-    logger.info(f"Created MR/PR: {mr}")
+    url = mr.get("web_url") or mr.get("html_url") or mr.get("url") or "(no URL)"
+    logger.info(f"Created MR/PR: {url}")
     return mr

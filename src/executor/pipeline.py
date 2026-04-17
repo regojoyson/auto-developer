@@ -50,10 +50,10 @@ RESULT_MARKER = "__PIPELINE_RESULT__:"
 
 # Phase display names for clear logging
 PHASE_NAMES = {
-    "orchestrator:analyze": "Phase 1 — Analyze",
-    "orchestrator:plan": "Phase 2 — Plan",
-    "orchestrator:implement": "Phase 3 — Implement",
-    "orchestrator:rework": "Rework — Apply Fixes",
+    "phase:analyze": "Phase 1 — Analyze",
+    "phase:plan": "Phase 2 — Plan",
+    "phase:implement": "Phase 3 — Implement",
+    "phase:rework": "Rework — Apply Fixes",
     "feedback-parser": "Rework — Parse Feedback",
 }
 
@@ -126,16 +126,16 @@ def _log_phase(issue_key, phase_label, message):
 
     # Also write to output handlers so it appears in dashboard logs
     handlers = get_output_handlers()
-    handlers.on_output(issue_key, "orchestrator", f"\n{'='*60}", "stdout")
-    handlers.on_output(issue_key, "orchestrator", f"  {display}: {message}", "stdout")
-    handlers.on_output(issue_key, "orchestrator", f"{'='*60}\n", "stdout")
+    handlers.on_output(issue_key, "pipeline", f"\n{'='*60}", "stdout")
+    handlers.on_output(issue_key, "pipeline", f"  {display}: {message}", "stdout")
+    handlers.on_output(issue_key, "pipeline", f"{'='*60}\n", "stdout")
 
 
 def _log_step(issue_key, message):
     """Log a pipeline step (not tied to a specific phase)."""
     logger.info(f"{issue_key}: {message}")
     handlers = get_output_handlers()
-    handlers.on_output(issue_key, "orchestrator", f"  >> {message}", "stdout")
+    handlers.on_output(issue_key, "pipeline", f"  >> {message}", "stdout")
 
 
 # ─── Result Parsing ─────────────────────────────────────
@@ -169,10 +169,7 @@ def _extract_blocked_reason(result):
 # ─── Best-Effort External Calls ─────────────────────────
 
 def _try_transition_issue(issue_key, status_name):
-    """Transition issue status (best-effort). Skipped in MCP mode — agent handles it."""
-    if not is_api_mode():
-        logger.info(f"{issue_key}: Skipping transition (MCP mode — agent handles via MCP tools)")
-        return
+    """Transition issue status (best-effort — logs on failure, never raises)."""
     try:
         adapter, _ = get_issue_tracker()
         adapter.transition_issue(issue_key, status_name)
@@ -182,10 +179,7 @@ def _try_transition_issue(issue_key, status_name):
 
 
 def _try_add_comment(issue_key, body):
-    """Post an issue comment (best-effort). Skipped in MCP mode — agent handles it."""
-    if not is_api_mode():
-        logger.info(f"{issue_key}: Skipping comment (MCP mode — agent handles via MCP tools)")
-        return
+    """Post an issue comment (best-effort — logs on failure, never raises)."""
     try:
         adapter, _ = get_issue_tracker()
         adapter.add_comment(issue_key, body)
@@ -244,7 +238,7 @@ def _handle_agent_failure(issue_key, branch, agent_name, result, statuses):
 def _handle_blocked(issue_key, branch, statuses, result):
     """Handle an agent reporting the ticket is blocked."""
     reason = _extract_blocked_reason(result)
-    _log_phase(issue_key, "orchestrator:analyze", f"BLOCKED — {reason}")
+    _log_phase(issue_key, "phase:analyze", f"BLOCKED — {reason}")
 
     _try_add_comment(issue_key,
         f"Pipeline blocked — additional information needed:\n\n{reason}")
@@ -264,7 +258,7 @@ def _run_phase(
         issue_key: Ticket key (e.g. "EV-14942").
         branch: Git branch name.
         agent_name: Agent to invoke (e.g. "analyze").
-        phase_label: Label for tracking (e.g. "orchestrator:analyze").
+        phase_label: Label for tracking (e.g. "phase:analyze").
         input_data: JSON string input for the agent.
         statuses: Dict of issue status names.
         repo_dir: Working directory for the agent.
@@ -410,7 +404,7 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
     analyze_input = json.dumps(analyze_payload)
 
     result = _run_phase(
-        issue_key, branch, "analyze", "orchestrator:analyze",
+        issue_key, branch, "analyze", "phase:analyze",
         analyze_input, statuses, repo_dir,
         phase_scope=ANALYZE_SCOPE,
     )
@@ -445,7 +439,7 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
         "branch": branch,
     })
     result = _run_phase(
-        issue_key, branch, "plan", "orchestrator:plan",
+        issue_key, branch, "plan", "phase:plan",
         plan_input, statuses, repo_dir,
         phase_scope=PLAN_SCOPE,
     )
@@ -482,7 +476,7 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
         "branch": branch,
     })
     result = _run_phase(
-        issue_key, branch, "implement", "orchestrator:implement",
+        issue_key, branch, "implement", "phase:implement",
         implement_input, statuses, repo_dir,
         phase_scope=IMPLEMENT_SCOPE,
     )
@@ -591,7 +585,7 @@ def run_rework_phases(issue_key, branch, pr_id, statuses, repo_dir):
     # ── Step 2: Apply rework ─────────────────────────────
     rework_input = json.dumps({"issueKey": issue_key, "branch": branch})
     result = _run_phase(
-        issue_key, branch, "rework", "orchestrator:rework",
+        issue_key, branch, "rework", "phase:rework",
         rework_input, statuses, repo_dir,
         phase_scope=REWORK_SCOPE,
     )
