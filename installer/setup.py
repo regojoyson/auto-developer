@@ -821,11 +821,11 @@ def main():
         border_style="green",
     ))
 
-    # ─── Optional Dashboard Panel ────────────────────────
-    dashboard_lines = [
-        "[dim]A web dashboard to monitor pipelines, view logs, and trigger runs.[/dim]",
+    # ─── Optional Console Panel ────────────────────────
+    console_lines = [
+        "[dim]A web console to monitor pipelines, view logs, and trigger runs.[/dim]",
         "",
-        "  [cyan]cd dashboard-react[/cyan]",
+        "  [cyan]cd console[/cyan]",
         "  [cyan]npm install[/cyan]        [dim]# first time only[/dim]",
         "  [cyan]npm run dev[/cyan]        [dim]# starts on http://localhost:3001[/dim]",
         "",
@@ -834,8 +834,8 @@ def main():
     ]
 
     console.print(Panel(
-        "\n".join(dashboard_lines),
-        title="[bold cyan]Optional — Dashboard UI[/bold cyan]",
+        "\n".join(console_lines),
+        title="[bold cyan]Optional — Web Console[/bold cyan]",
         subtitle="[dim]skip this if you prefer CLI / API only[/dim]",
         border_style="dim cyan",
     ))

@@ -108,12 +108,12 @@ tail -f logs/agents/PROJ-42-orchestrator.log
 
 ---
 
-## Dashboard (Optional)
+## Console (Optional)
 
-A React-based web dashboard for monitoring and triggering pipelines. Requires the API server to be running on port 3000.
+A React-based web console for monitoring and triggering pipelines. Requires the API server to be running on port 3000.
 
 ```bash
-cd dashboard-react
+cd console
 npm install        # first time only
 npm run dev        # starts on http://localhost:3001
 ```
@@ -169,7 +169,7 @@ auto-developer/
 │   └── executor/
 │       ├── runner.py            # Spawns AI coding CLI processes
 │       └── pipeline.py          # Phase runner (drives analyze → plan → implement → review)
-├── dashboard-react/             # Optional React dashboard (port 3001)
+├── console/             # Optional React dashboard (port 3001)
 ├── mcp_servers/                 # GitLab + GitHub MCP servers (Python)
 ├── docs/                        # All documentation + diagrams
 ├── requirements.txt             # Python dependencies

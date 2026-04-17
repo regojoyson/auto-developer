@@ -10,7 +10,7 @@ export default function Sidebar() {
     <aside className="w-56 bg-gray-900 text-gray-100 min-h-screen flex flex-col fixed left-0 top-0 bottom-0 z-10">
       <div className="p-5 border-b border-gray-700">
         <h1 className="text-lg font-bold tracking-tight">Auto Developer</h1>
-        <p className="text-xs text-gray-400 mt-1">Pipeline Dashboard</p>
+        <p className="text-xs text-gray-400 mt-1">Pipeline Console</p>
       </div>
       <nav className="flex-1 p-3 space-y-1">
         <Link
