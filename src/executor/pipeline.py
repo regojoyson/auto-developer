@@ -608,6 +608,69 @@ def _run_impl_for_repo(
                 "prId": None, "mrUrl": None, "error": err}
 
 
+# ─── Heuristic Repo Picker ──────────────────────────────
+
+def _heuristic_pick_repos(picker_ticket: dict, candidates: list[str]) -> tuple[list[str], dict]:
+    """Score candidate folder names against the ticket text.
+
+    Cheap, deterministic, no LLM. Used as both a fast path (when a
+    candidate name clearly appears in the ticket text) and a fallback
+    when the LLM repo-picker fails to return a usable result.
+
+    The algorithm is intentionally simple: split each candidate name on
+    non-word chars into tokens, lowercase everything, and count how many
+    of those tokens appear as words in the ticket text. A candidate
+    scores 1 per matched token (min token length 3 to avoid "db" noise).
+
+    Returns:
+        (picked, scores) — ``picked`` is the list of top-scoring
+        candidates (all tied at the max score, or empty when nothing
+        matched). ``scores`` is the full {candidate: score} map for
+        logging / LLM prompting.
+    """
+    import re
+
+    haystack_parts = [
+        str(picker_ticket.get("summary") or ""),
+        str(picker_ticket.get("description") or ""),
+    ]
+    ac = picker_ticket.get("acceptance_criteria")
+    if isinstance(ac, list):
+        haystack_parts.extend(str(a) for a in ac)
+    elif ac:
+        haystack_parts.append(str(ac))
+    haystack = " ".join(haystack_parts).lower()
+    ticket_tokens = set(re.findall(r"[a-z0-9]+", haystack))
+
+    scores: dict[str, int] = {}
+    for c in candidates:
+        tokens = [t for t in re.split(r"[^a-z0-9]+", c.lower()) if len(t) >= 3]
+        if not tokens:
+            scores[c] = 0
+            continue
+        scores[c] = sum(1 for t in tokens if t in ticket_tokens)
+
+    top = max(scores.values()) if scores else 0
+    if top == 0:
+        return [], scores
+    picked = [c for c, s in scores.items() if s == top]
+    return picked, scores
+
+
+def _heuristic_is_confident(scores: dict, picked: list[str]) -> bool:
+    """Return True when the heuristic's top pick is unambiguous enough to
+    skip the LLM entirely.
+
+    Confident = exactly one candidate holds the top score, AND that
+    score is at least 2 matched tokens (so a single-letter coincidence
+    like "er" matching "error" doesn't count).
+    """
+    if len(picked) != 1:
+        return False
+    top = scores.get(picked[0], 0)
+    return top >= 2
+
+
 # ─── Main Pipeline ──────────────────────────────────────
 
 def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, statuses, repo_dir):
@@ -677,48 +740,79 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
                 picker_ticket = {"summary": summary, "description": ""}
         picker_ticket_data = picker_ticket  # reused below
 
-        # Truncate description + AC heavily so the model picks a repo from
-        # the ticket headline instead of getting invested in "solving" the
-        # issue (it would otherwise waste its turn budget exploring code).
-        _desc = (picker_ticket.get("description") or "")[:400]
-        _ac_raw = picker_ticket.get("acceptance_criteria") or []
-        if isinstance(_ac_raw, list):
-            _ac = [str(a)[:150] for a in _ac_raw[:3]]
-        else:
-            _ac = [str(_ac_raw)[:400]]
-        picker_input = json.dumps({
-            "issueKey": issue_key,
-            "summary": picker_ticket.get("summary", summary),
-            "description": _desc,
-            "acceptanceCriteria": _ac,
-            "parentDir": str(parent),
-            "candidates": candidates,
-        })
+        # ── Heuristic pre-score ─────────────────────────
+        # Fast, deterministic, no LLM. If a candidate name clearly shows
+        # up in the ticket text, we can skip the LLM entirely. Otherwise
+        # the scores are used as fallback when the LLM picker misbehaves
+        # (burns its turn budget exploring the codebase instead of
+        # emitting a result — something we've seen repeatedly).
+        heuristic_picks, heuristic_scores = _heuristic_pick_repos(picker_ticket, candidates)
+        _log_step(issue_key, f"Heuristic picker scores: {heuristic_scores}")
 
-        _log_step(issue_key, f"Invoking repo-picker over {len(candidates)} candidates...")
-        picker_result = _run_phase(
-            issue_key, branch, "repo-picker", "phase:repo-picker",
-            picker_input, statuses, repo_dir,
-            phase_scope=REPO_PICKER_SCOPE,
-        )
-        if picker_result is None:
-            return  # blocked / failed — already handled by _run_phase
-
-        pipeline_result = _extract_pipeline_result(picker_result.get("output", ""))
-        # Accept new list format OR legacy single-repo format for safety.
         chosen_repos = None
-        if pipeline_result:
-            if isinstance(pipeline_result.get("repos"), list):
-                chosen_repos = [r for r in pipeline_result["repos"] if r in candidates]
-            elif pipeline_result.get("repo") in candidates:
-                chosen_repos = [pipeline_result["repo"]]
-        if not chosen_repos:
-            _log_step(issue_key, f"CRITICAL: picker returned no valid repos: {pipeline_result!r}")
-            transition_state(branch, "failed", error={
-                "phase": "analyzing", "agent": "pipeline",
-                "message": f"Repo-picker returned no valid repo: {pipeline_result!r}",
+        if _heuristic_is_confident(heuristic_scores, heuristic_picks):
+            chosen_repos = heuristic_picks
+            _log_step(issue_key,
+                f"Heuristic picked {chosen_repos} (confident, score={heuristic_scores[chosen_repos[0]]}) — skipping LLM")
+
+        if chosen_repos is None:
+            # Truncate description + AC heavily so the model picks a repo from
+            # the ticket headline instead of getting invested in "solving" the
+            # issue (it would otherwise waste its turn budget exploring code).
+            _desc = (picker_ticket.get("description") or "")[:400]
+            _ac_raw = picker_ticket.get("acceptance_criteria") or []
+            if isinstance(_ac_raw, list):
+                _ac = [str(a)[:150] for a in _ac_raw[:3]]
+            else:
+                _ac = [str(_ac_raw)[:400]]
+            picker_input = json.dumps({
+                "issueKey": issue_key,
+                "summary": picker_ticket.get("summary", summary),
+                "description": _desc,
+                "acceptanceCriteria": _ac,
+                "parentDir": str(parent),
+                "candidates": candidates,
+                "heuristicScores": heuristic_scores,
             })
-            return
+
+            _log_step(issue_key, f"Invoking repo-picker over {len(candidates)} candidates...")
+            picker_result = _run_phase(
+                issue_key, branch, "repo-picker", "phase:repo-picker",
+                picker_input, statuses, repo_dir,
+                phase_scope=REPO_PICKER_SCOPE,
+            )
+
+            pipeline_result = (
+                _extract_pipeline_result(picker_result.get("output", ""))
+                if picker_result else None
+            )
+            # Accept new list format OR legacy single-repo format for safety.
+            if pipeline_result:
+                if isinstance(pipeline_result.get("repos"), list):
+                    chosen_repos = [r for r in pipeline_result["repos"] if r in candidates] or None
+                elif pipeline_result.get("repo") in candidates:
+                    chosen_repos = [pipeline_result["repo"]]
+
+            if not chosen_repos:
+                # LLM failed — fall back in order of preference:
+                #   1) heuristic (even weak single-token match),
+                #   2) config.repo.default_component (user-specified safety
+                #      net for ambiguous tickets),
+                #   3) all candidates (expensive — last resort).
+                if heuristic_picks:
+                    chosen_repos = heuristic_picks
+                    _log_step(issue_key,
+                        f"LLM picker failed; falling back to heuristic: {chosen_repos}")
+                else:
+                    default_comp = app_config["repo"].get("default_component")
+                    if default_comp and default_comp in candidates:
+                        chosen_repos = [default_comp]
+                        _log_step(issue_key,
+                            f"LLM picker failed; no heuristic match; falling back to default_component='{default_comp}'")
+                    else:
+                        chosen_repos = list(candidates)
+                        _log_step(issue_key,
+                            f"LLM picker failed and no heuristic/default match; fanning out to ALL {len(candidates)} candidates")
 
         _log_step(issue_key, f"Picker chose: {chosen_repos}")
         from src.state.manager import set_state_repos
