@@ -64,6 +64,7 @@ class GitLabAdapter(GitProviderBase):
                 "branch": payload.get("object_attributes", {}).get("source_branch"),
                 "pr_id": payload.get("object_attributes", {}).get("iid"),
                 "author": payload.get("user", {}).get("username", ""),
+                "project_id": payload.get("project", {}).get("id"),
             }
 
         if event_type == "Push Hook":
@@ -76,6 +77,7 @@ class GitLabAdapter(GitProviderBase):
                 "branch": ref.replace("refs/heads/", ""),
                 "pr_id": None,
                 "author": author,
+                "project_id": payload.get("project", {}).get("id"),
             }
 
         if event_type == "Note Hook":
@@ -90,6 +92,7 @@ class GitLabAdapter(GitProviderBase):
                 "branch": payload.get("merge_request", {}).get("source_branch"),
                 "pr_id": payload.get("merge_request", {}).get("iid"),
                 "author": author,
+                "project_id": payload.get("project", {}).get("id"),
             }
 
         return None

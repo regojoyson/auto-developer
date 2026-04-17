@@ -18,7 +18,7 @@ import threading
 from fastapi import APIRouter, Request
 
 from src.config import config
-from src.state.manager import get_state, transition_state, is_rework_limit_exceeded, list_active_states
+from src.state.manager import get_state, transition_state, is_rework_limit_exceeded, list_active_states, find_repo_by_pr_id
 from src.executor.pipeline import run_rework_phases, try_add_comment, try_notify_slack
 from src.providers.git_provider import get_git_provider
 
@@ -105,11 +105,30 @@ async def handle_webhook(request: Request):
             try_notify_slack(f"{state['issueKey']} escalation: rework limit exceeded")
             return {"received": True}
 
-        logger.info(f"Review comment for {state['issueKey']}, starting rework pipeline")
+        # Route rework to the specific repo whose MR was commented on.
+        # Multi-repo tickets have N MRs; we only want to rework the one
+        # the reviewer actually commented on, leaving the others untouched.
+        repo_entry = find_repo_by_pr_id(state, pr_id)
+        if repo_entry:
+            repo_dir = repo_entry["path"]
+            logger.info(
+                f"Review comment for {state['issueKey']} on MR {pr_id} "
+                f"(repo: {repo_entry['name']}), starting rework pipeline"
+            )
+        else:
+            # Backward-compat: legacy single-repo state records or states
+            # where the pr_id wasn't recorded per-repo yet. Fall back to the
+            # top-level repoPath.
+            repo_dir = state.get("repoPath", ".")
+            logger.info(
+                f"Review comment for {state['issueKey']} on MR {pr_id} "
+                f"(no repo match, using repoPath), starting rework pipeline"
+            )
+
         statuses = _get_statuses()
         threading.Thread(
             target=run_rework_phases,
-            args=(state["issueKey"], resolved_branch, pr_id, statuses, state.get("repoPath", ".")),
+            args=(state["issueKey"], resolved_branch, pr_id, statuses, repo_dir),
             daemon=True,
         ).start()
 
