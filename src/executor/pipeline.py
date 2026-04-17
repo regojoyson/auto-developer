@@ -34,6 +34,7 @@ from src.executor.phase_scope import (
     IMPLEMENT_SCOPE,
     REWORK_SCOPE,
     FEEDBACK_PARSER_SCOPE,
+    REPO_PICKER_SCOPE,
 )
 from src.executor.pipeline_git import (
     create_remote_branch,
@@ -50,12 +51,19 @@ RESULT_MARKER = "__PIPELINE_RESULT__:"
 
 # Phase display names for clear logging
 PHASE_NAMES = {
+    "phase:repo-picker": "Phase 0 — Repo Selection",
     "phase:analyze": "Phase 1 — Analyze",
     "phase:plan": "Phase 2 — Plan",
     "phase:implement": "Phase 3 — Implement",
     "phase:rework": "Rework — Apply Fixes",
     "feedback-parser": "Rework — Parse Feedback",
 }
+
+
+def _os_path_has_git(path: str) -> bool:
+    """Return True if ``path`` contains a .git directory (i.e. is a git repo)."""
+    from pathlib import Path
+    return (Path(path) / ".git").exists()
 
 
 # ─── Repo Preparation ──────────────────────────────────
@@ -327,7 +335,86 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
 
     # ── Step 1: Prepare repo ─────────────────────────────
     _log_step(issue_key, f"Preparing repo — stash, checkout {base_branch}, pull latest...")
-    _prepare_repo_for_branch(repo_dir, base_branch)
+    # Skip repo preparation if repo_dir is a parent dir (no .git) — it will
+    # be re-prepared below after the picker chooses a sub-repo.
+    if _os_path_has_git(repo_dir):
+        _prepare_repo_for_branch(repo_dir, base_branch)
+    else:
+        _log_step(issue_key, f"{repo_dir} is not a git repo — deferring repo prep until after picker")
+
+    # ── Step 1b: Repo selection (parentDir mode only) ────
+    # If config is parentDir AND no component was provided AND no default is
+    # set, then repo_dir currently points at the PARENT directory (no git
+    # inside). Invoke the repo-picker agent to choose the right sub-repo.
+    ticket_data = None
+    if app_config["repo"]["mode"] == "parentDir" and not _os_path_has_git(repo_dir):
+        from pathlib import Path as _Path
+        parent = _Path(repo_dir)
+        candidates = [
+            d.name for d in sorted(parent.iterdir())
+            if d.is_dir() and not d.name.startswith(".") and (d / ".git").exists()
+        ]
+        if not candidates:
+            _log_step(issue_key, "CRITICAL: parentDir has no git sub-repos to pick from")
+            transition_state(branch, "failed", error={
+                "phase": "analyzing", "agent": "pipeline",
+                "message": f"No git sub-repos found under {repo_dir}",
+            })
+            return
+
+        # Read the full ticket now (same as api-mode read_ticket below) so the
+        # picker has something to work with.
+        picker_ticket = None
+        try:
+            adapter_tmp, _ = get_issue_tracker()
+            picker_ticket = adapter_tmp.read_issue(issue_key)
+            # Cache for later so Step 3 (API mode) doesn't need to re-read.
+            ticket_data = picker_ticket
+        except Exception as e:
+            logger.warning(f"{issue_key}: could not read ticket for picker — {e}")
+            picker_ticket = {"summary": summary, "description": ""}
+
+        picker_input = json.dumps({
+            "issueKey": issue_key,
+            "summary": picker_ticket.get("summary", summary),
+            "description": picker_ticket.get("description", ""),
+            "acceptanceCriteria": picker_ticket.get("acceptance_criteria", []),
+            "parentDir": str(parent),
+            "candidates": candidates,
+        })
+
+        _log_step(issue_key, f"Invoking repo-picker over {len(candidates)} candidates...")
+        picker_result = _run_phase(
+            issue_key, branch, "repo-picker", "phase:repo-picker",
+            picker_input, statuses, repo_dir,
+            phase_scope=REPO_PICKER_SCOPE,
+        )
+        if picker_result is None:
+            return  # blocked / failed — already handled by _run_phase
+
+        pipeline_result = _extract_pipeline_result(picker_result.get("output", ""))
+        chosen = pipeline_result and pipeline_result.get("repo")
+        if not chosen or chosen not in candidates:
+            _log_step(issue_key, f"CRITICAL: picker returned invalid repo: {chosen!r}")
+            transition_state(branch, "failed", error={
+                "phase": "analyzing", "agent": "pipeline",
+                "message": f"Repo-picker returned invalid choice: {chosen!r}",
+            })
+            return
+
+        repo_dir = str(parent / chosen)
+        _log_step(issue_key, f"Picker chose sub-repo: {chosen}")
+        # Re-prepare the now-real repo on base_branch
+        _prepare_repo_for_branch(repo_dir, base_branch)
+
+        # Update the state record so dashboard/cancel/delete see the real path
+        try:
+            from src.state.manager import update_state_repo_path
+            update_state_repo_path(branch, repo_dir)
+        except ImportError:
+            # If no such helper exists, that's fine — state.json will just have
+            # the parent path until the next run. Best-effort.
+            pass
 
     # ── Step 2: Transition ticket to Development ─────────
     if is_api_mode():
@@ -352,8 +439,8 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
         _log_step(issue_key, "Ticket transition will be handled by agent via MCP")
 
     # ── Step 3: Read ticket (API mode only) ──────────────
-    ticket_data = None
-    if is_api_mode():
+    # ticket_data may already be set from the picker step above.
+    if is_api_mode() and ticket_data is None:
         _log_step(issue_key, "Reading ticket details via REST API...")
         try:
             adapter, _ = get_issue_tracker()

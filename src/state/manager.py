@@ -201,6 +201,25 @@ def record_phase_end(branch: str, exit_code: int, result: str) -> dict:
     return current
 
 
+def update_state_repo_path(branch: str, repo_path: str) -> None:
+    """Update the repoPath field on an existing state record (best-effort).
+
+    Used when the pipeline re-resolves ``repo_dir`` mid-flight (e.g. after
+    the repo-picker chooses a sub-repo under a parentDir). If the state
+    file doesn't exist, this is a silent no-op.
+
+    Args:
+        branch: Git branch name.
+        repo_path: New absolute path to the repo directory.
+    """
+    current = get_state(branch)
+    if not current:
+        return
+    current["repoPath"] = repo_path
+    current["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    _state_path(branch).write_text(json.dumps(current, indent=2))
+
+
 def update_artifacts(branch: str, **kwargs) -> dict:
     """Update artifact tracking fields (mrUrl, prId, etc.).
 

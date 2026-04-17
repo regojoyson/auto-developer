@@ -95,6 +95,7 @@ def load() -> dict:
             "urls": raw.get("repo", {}).get("urls", []),
             "clone_dir": raw.get("repo", {}).get("cloneDir", "/tmp/auto-pilot-repos"),
             "base_branch": raw.get("repo", {}).get("baseBranch", "main"),
+            "default_component": raw.get("repo", {}).get("defaultComponent"),
         },
         "issue_tracker": _parse_issue_tracker(raw.get("issueTracker", {})),
         "git_provider": {

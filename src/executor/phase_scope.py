@@ -78,3 +78,12 @@ FEEDBACK_PARSER_SCOPE = PhaseScope(
     allowed_subagents=(),
     max_turns=10,
 )
+
+# Repo picker: reads ticket data, picks a sub-repo name. No write access.
+REPO_PICKER_SCOPE = PhaseScope(
+    allowed_tools=("Read",),
+    disallowed_tools=("Task", "Bash", "Write", "Edit", "WebFetch"),
+    allowed_mcp_servers=(),
+    allowed_subagents=(),
+    max_turns=5,
+)
