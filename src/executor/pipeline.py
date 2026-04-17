@@ -28,6 +28,20 @@ from src.providers.issue_tracker import get_issue_tracker, is_api_mode
 from src.providers.notification import get_notification
 from src.providers.output_handler import get_output_handlers
 from src.repos.resolver import get_base_branch
+from src.executor.phase_scope import (
+    ANALYZE_SCOPE,
+    PLAN_SCOPE,
+    IMPLEMENT_SCOPE,
+    REWORK_SCOPE,
+    FEEDBACK_PARSER_SCOPE,
+)
+from src.executor.pipeline_git import (
+    create_remote_branch,
+    commit_local_file_via_api,
+    push_local_branch,
+    create_merge_request,
+)
+from src.providers.git_provider import get_git_provider
 
 logger = logging.getLogger(__name__)
 
@@ -234,17 +248,21 @@ def _handle_blocked(issue_key, branch, statuses, result):
 
 # ─── Phase Runner ───────────────────────────────────────
 
-def _run_phase(issue_key, branch, agent_name, phase_label, input_data, statuses, repo_dir):
+def _run_phase(
+    issue_key, branch, agent_name, phase_label,
+    input_data, statuses, repo_dir, *, phase_scope=None,
+):
     """Run a single pipeline phase with full tracking and error handling.
 
     Args:
         issue_key: Ticket key (e.g. "EV-14942").
         branch: Git branch name.
-        agent_name: Agent to invoke (e.g. "orchestrator").
+        agent_name: Agent to invoke (e.g. "analyze").
         phase_label: Label for tracking (e.g. "orchestrator:analyze").
         input_data: JSON string input for the agent.
         statuses: Dict of issue status names.
         repo_dir: Working directory for the agent.
+        phase_scope: Optional :class:`PhaseScope` restricting agent tools.
 
     Returns:
         Agent result dict on success, or None if the phase failed/blocked.
@@ -254,11 +272,17 @@ def _run_phase(issue_key, branch, agent_name, phase_label, input_data, statuses,
     _log_phase(issue_key, phase_label, "Starting...")
 
     try:
-        result = run_agent(agent_name, input_data, cwd=repo_dir, issue_key=issue_key)
+        result = run_agent(
+            agent_name, input_data,
+            cwd=repo_dir, issue_key=issue_key,
+            phase_scope=phase_scope,
+        )
     except Exception as e:
         record_phase_end(branch, -1, "failed")
-        _handle_agent_failure(issue_key, branch, phase_label,
-            {"success": False, "error": str(e)}, statuses)
+        _handle_agent_failure(
+            issue_key, branch, phase_label,
+            {"success": False, "error": str(e)}, statuses,
+        )
         return None
 
     if not result.get("success"):
@@ -346,10 +370,27 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
             return
 
     # ── Step 4: Phase 1 — Analyze ────────────────────────
-    # Agent reads ticket (or receives pre-read data), creates feature branch, writes TICKET.md
+    # Agent writes TICKET.md to repo_dir locally. Python creates the
+    # remote branch and commits TICKET.md via the git-provider API.
+    _log_step(issue_key, "Preparing git-provider API client...")
+    git_adapter, _git_config = get_git_provider()
+    import os as _os
+    git_api = git_adapter.create_api(dict(_os.environ), repo_dir=repo_dir)
+
+    _log_step(issue_key, f"Creating remote branch {branch} from {base_branch}...")
+    try:
+        create_remote_branch(git_api, branch=branch, base=base_branch)
+    except Exception as e:
+        _log_step(issue_key, f"CRITICAL: remote branch creation failed — {e}")
+        transition_state(branch, "failed", error={
+            "phase": "analyzing", "agent": "pipeline",
+            "message": f"Failed to create remote branch: {e}",
+        })
+        _try_notify_slack(f"{issue_key} pipeline failed — branch creation error")
+        return
+
     api_mode = app_config["issue_tracker"]["api_mode"]
     analyze_payload = {
-        "action": "analyze",
         "issueKey": issue_key,
         "branch": branch,
         "summary": summary,
@@ -361,10 +402,33 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
     if ticket_data:
         analyze_payload["ticketData"] = ticket_data
     analyze_input = json.dumps(analyze_payload)
-    result = _run_phase(issue_key, branch, "orchestrator", "orchestrator:analyze",
-                        analyze_input, statuses, repo_dir)
+
+    result = _run_phase(
+        issue_key, branch, "analyze", "orchestrator:analyze",
+        analyze_input, statuses, repo_dir,
+        phase_scope=ANALYZE_SCOPE,
+    )
     if result is None:
         return
+
+    # Python commits the agent-produced TICKET.md via the git-provider API.
+    try:
+        commit_local_file_via_api(
+            git_api,
+            repo_dir=repo_dir,
+            branch=branch,
+            file_path="TICKET.md",
+            message=f"docs({issue_key}): add ticket context",
+        )
+    except Exception as e:
+        _log_step(issue_key, f"CRITICAL: failed to commit TICKET.md — {e}")
+        transition_state(branch, "failed", error={
+            "phase": "analyzing", "agent": "pipeline",
+            "message": f"Failed to commit TICKET.md: {e}",
+        })
+        return
+
+    _try_add_comment(issue_key, f"Analysis complete for {issue_key}. See TICKET.md on branch `{branch}`.")
 
     # ── Step 4: Phase 2 — Plan ───────────────────────────
     # Brainstorm agent explores codebase, writes PLAN.md, posts plan comment
