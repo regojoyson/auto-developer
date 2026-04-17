@@ -140,6 +140,7 @@ Features: live pipeline list with auto-refresh, pipeline detail view, real-time 
 | **[API Spec](docs/api-spec.md)** | Every HTTP endpoint, request/response formats |
 | **[OpenAPI Spec](docs/openapi.yaml)** | Import into Postman, Swagger UI, or any API tool |
 | **[Custom Providers](docs/custom-providers.md)** | Add your own issue tracker, git provider, CLI, or notification |
+| **[Codebase Guide](docs/codebase-guide.md)** | What every file and folder does — a map of the code |
 | **[Spec Document](docs/spec.md)** | Architecture, agent contracts, risks |
 
 ---
