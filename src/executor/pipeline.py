@@ -430,21 +430,40 @@ def run_pipeline_phases(issue_key, branch, summary, project_key, base_branch, st
 
     _try_add_comment(issue_key, f"Analysis complete for {issue_key}. See TICKET.md on branch `{branch}`.")
 
-    # ── Step 4: Phase 2 — Plan ───────────────────────────
-    # Brainstorm agent explores codebase, writes PLAN.md, posts plan comment
+    # ── Step 5: Phase 2 — Plan ───────────────────────────
     _log_step(issue_key, "Transitioning state: analyzing → planning")
     transition_state(branch, "planning")
+
     plan_input = json.dumps({
-        "action": "plan",
         "issueKey": issue_key,
         "branch": branch,
-        "statuses": statuses,
-        "apiMode": api_mode,
     })
-    result = _run_phase(issue_key, branch, "orchestrator", "orchestrator:plan",
-                        plan_input, statuses, repo_dir)
+    result = _run_phase(
+        issue_key, branch, "plan", "orchestrator:plan",
+        plan_input, statuses, repo_dir,
+        phase_scope=PLAN_SCOPE,
+    )
     if result is None:
         return
+
+    # Python commits the agent-produced PLAN.md via the git-provider API.
+    try:
+        commit_local_file_via_api(
+            git_api,
+            repo_dir=repo_dir,
+            branch=branch,
+            file_path="PLAN.md",
+            message=f"docs({issue_key}): add implementation plan",
+        )
+    except Exception as e:
+        _log_step(issue_key, f"CRITICAL: failed to commit PLAN.md — {e}")
+        transition_state(branch, "failed", error={
+            "phase": "planning", "agent": "pipeline",
+            "message": f"Failed to commit PLAN.md: {e}",
+        })
+        return
+
+    _try_add_comment(issue_key, f"Plan written for {issue_key}. See PLAN.md on branch `{branch}`.")
 
     # ── Step 5: Prepare repo for implementation ──────────
     # Checkout the feature branch locally so developer agent can work
