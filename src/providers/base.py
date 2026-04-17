@@ -261,6 +261,16 @@ class CliAdapterBase(ABC):
         """
         ...
 
+    def format_stream_line(self, line: str) -> str:
+        """Format a single streamed stdout line for display in logs/UI.
+
+        Called once per line as the agent runs, before the line reaches
+        output handlers. Default: pass through unchanged. Override in
+        adapters that emit structured output (e.g. stream-json) to render
+        a readable summary. Return an empty string to suppress the line.
+        """
+        return line
+
 
 class OutputHandlerBase(ABC):
     """Base class for agent output handlers.

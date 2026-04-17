@@ -104,6 +104,7 @@ def load() -> dict:
         "cli_adapter": {
             "type": raw.get("cliAdapter", {}).get("type", "claude-code"),
             "model": raw.get("cliAdapter", {}).get("model"),
+            "fallback_model": raw.get("cliAdapter", {}).get("fallbackModel"),
             "max_turns": raw.get("cliAdapter", {}).get("maxTurnsPerRun"),
             "timeout": raw.get("cliAdapter", {}).get("timeout", 300000),
             "command": raw.get("cliAdapter", {}).get("command"),

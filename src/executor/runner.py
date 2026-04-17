@@ -51,10 +51,14 @@ NO_SLACK_PREAMBLE = (
 )
 
 
-def _stream_pipe(pipe, issue_key: str, agent_name: str, stream_name: str, handlers, lines: list):
+def _stream_pipe(pipe, issue_key: str, agent_name: str, stream_name: str, handlers, lines: list, formatter=None):
     """Read lines from a pipe and fan out to handlers.
 
-    Runs in a separate thread for each of stdout/stderr.
+    Runs in a separate thread for each of stdout/stderr. Raw lines are
+    collected into ``lines`` for the adapter's final ``parse_output``.
+    Handlers (file log, in-memory buffer for the dashboard) receive the
+    adapter-formatted version when a formatter is supplied, so readers
+    see a concise rendering instead of raw stream-json.
 
     Args:
         pipe: The subprocess pipe (stdout or stderr).
@@ -62,12 +66,16 @@ def _stream_pipe(pipe, issue_key: str, agent_name: str, stream_name: str, handle
         agent_name: Agent name.
         stream_name: "stdout" or "stderr".
         handlers: OutputHandlerRegistry instance.
-        lines: Shared list to collect lines for final output.
+        lines: Shared list to collect raw lines for final output.
+        formatter: Optional callable(line) -> str that renders a display
+            line. An empty return value suppresses the line from handlers.
     """
     for raw_line in pipe:
         line = raw_line.rstrip("\n").rstrip("\r")
         lines.append(line)
-        handlers.on_output(issue_key, agent_name, line, stream_name)
+        display = formatter(line) if formatter else line
+        if display:
+            handlers.on_output(issue_key, agent_name, display, stream_name)
     pipe.close()
 
 
@@ -138,7 +146,7 @@ def run_agent(
 
         stdout_thread = threading.Thread(
             target=_stream_pipe,
-            args=(proc.stdout, issue_key, agent_name, "stdout", handlers, stdout_lines),
+            args=(proc.stdout, issue_key, agent_name, "stdout", handlers, stdout_lines, adapter.format_stream_line),
             daemon=True,
         )
         stderr_thread = threading.Thread(
