@@ -74,8 +74,8 @@
           "name": "Get Agent Logs (specific agent)",
           "request": {
             "method": "GET",
-            "url": "{{baseUrl}}/api/status/PROJ-42/logs?agent=orchestrator",
-            "description": "Get output for a specific agent only. Agents: orchestrator, brainstorm, developer, feedback-parser."
+            "url": "{{baseUrl}}/api/status/PROJ-42/logs?agent=analyze",
+            "description": "Get output for a specific agent only. Agents: analyze, plan, implement, rework, feedback-parser, pipeline."
           }
         },
         {
