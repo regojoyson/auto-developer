@@ -37,6 +37,21 @@ export default function PipelineList() {
 
   usePolling(fetchData);
 
+  const handleStop = async (issueKey) => {
+    if (!window.confirm(`Stop the running agent for ${issueKey}? State and logs are kept.`)) return;
+    try {
+      const data = await api.stop(issueKey);
+      if (data.stopped) {
+        showToast(`Pipeline ${issueKey} stopping…`);
+        fetchData();
+      } else {
+        showToast(data.reason || 'No running agent to stop', 'error');
+      }
+    } catch (err) {
+      showToast(`Error: ${err.message}`, 'error');
+    }
+  };
+
   const handleCancel = async (issueKey) => {
     if (!window.confirm(`Cancel pipeline for ${issueKey}? This will delete state and logs.`)) return;
     try {
@@ -51,6 +66,8 @@ export default function PipelineList() {
       showToast(`Error: ${err.message}`, 'error');
     }
   };
+
+  const isRunning = (state) => !['failed', 'merged', 'awaiting-review'].includes(state);
 
   if (error) {
     return <p className="text-red-500">Failed to load pipelines: {error}</p>;
@@ -107,6 +124,11 @@ export default function PipelineList() {
                     <Link to={`/pipeline/${p.issueKey}`} className="text-blue-600 hover:text-blue-800 text-sm font-medium">
                       Open
                     </Link>
+                    {isRunning(p.state) && (
+                      <button onClick={() => handleStop(p.issueKey)} className="text-amber-600 hover:text-amber-700 text-sm font-medium">
+                        Stop
+                      </button>
+                    )}
                     <button onClick={() => handleCancel(p.issueKey)} className="text-red-600 hover:text-red-800 text-sm font-medium">
                       Cancel
                     </button>

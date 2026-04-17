@@ -13,6 +13,7 @@ import logging
 from fastapi import APIRouter
 from src.state.manager import list_active_states, delete_state_by_issue_key
 from src.providers.output_handler import get_output_handlers
+from src.executor.runner import stop_running_agent, is_agent_running
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -67,6 +68,26 @@ async def get_pipeline_logs(issue_key: str, agent: str | None = None):
     }
 
 
+@router.post("/{issue_key}/stop")
+async def stop_pipeline(issue_key: str):
+    """Stop the running agent for an issue, keeping state and logs.
+
+    Sends SIGTERM (escalating to SIGKILL after 3s) to the agent process.
+    The pipeline's normal failure handler records the transition to
+    ``failed`` with ``error.message = "Stopped by user"``. Unlike
+    ``DELETE /{issue_key}``, this preserves the state file and logs so
+    they can be inspected.
+
+    Args:
+        issue_key: Ticket identifier (e.g. "PROJ-123").
+    """
+    if not is_agent_running(issue_key):
+        return {"stopped": False, "issueKey": issue_key, "reason": "No running agent"}
+    stop_running_agent(issue_key)
+    logger.info(f"Pipeline stop signalled: {issue_key}")
+    return {"stopped": True, "issueKey": issue_key}
+
+
 @router.delete("/{issue_key}")
 async def cancel_pipeline(issue_key: str):
     """Cancel and remove a pipeline by issue key.
@@ -79,6 +100,8 @@ async def cancel_pipeline(issue_key: str):
     Returns:
         dict: ``{"cancelled": True, ...}`` if found, or error if not found.
     """
+    # Stop any running agent first so it doesn't keep writing logs after delete.
+    stop_running_agent(issue_key)
     deleted = delete_state_by_issue_key(issue_key)
     if deleted:
         handlers = get_output_handlers()

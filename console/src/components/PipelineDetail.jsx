@@ -202,27 +202,46 @@ function InfoCard({ pipeline }) {
   );
 }
 
-function LogsViewer({ issueKey, logOutput, logMeta, agent, setAgent, logRef, handleScroll, onCopy }) {
+const TAG_RE = /^(\[[^\]]+\])(\s*)(.*)$/;
+
+function tagSlug(tag) {
+  return tag.slice(1, -1).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+}
+
+function LogLine({ line }) {
+  const m = line.match(TAG_RE);
+  if (!m) return <div className="log-line">{line || '\u00a0'}</div>;
+  return (
+    <div className="log-line">
+      <span className={`log-tag log-tag-${tagSlug(m[1])}`}>{m[1]}</span>
+      {m[2]}{m[3]}
+    </div>
+  );
+}
+
+function LogsViewer({
+  logOutput, logMeta, agent, setAgent, logRef, handleScroll, onCopy,
+  autoScroll, onJumpToLatest, fullscreen, setFullscreen, wrapLines, setWrapLines,
+}) {
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Highlight search term in logs
-  const displayOutput = useMemo(() => {
-    if (!searchTerm) return logOutput;
-    const regex = new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-    const matches = (logOutput.match(regex) || []).length;
-    return { text: logOutput, matches };
-  }, [logOutput, searchTerm]);
-
-  const filteredLines = useMemo(() => {
-    if (!searchTerm) return logOutput.split('\n');
+  const visibleLines = useMemo(() => {
+    const lines = logOutput.split('\n');
+    if (!searchTerm) return lines;
     const term = searchTerm.toLowerCase();
-    return logOutput.split('\n').filter(line => line.toLowerCase().includes(term));
+    return lines.filter(line => line.toLowerCase().includes(term));
   }, [logOutput, searchTerm]);
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <h3 className="font-semibold text-gray-800">Agent Logs</h3>
+    <div className={`log-panel bg-white border border-gray-200 rounded-xl p-5 shadow-sm ${fullscreen ? 'log-panel-fullscreen' : ''}`}>
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <h3 className="font-semibold text-gray-800">Agent Logs</h3>
+          <span className={`log-status ${autoScroll ? 'log-status-live' : 'log-status-paused'}`}>
+            <span className="log-status-dot" />
+            {autoScroll ? 'Live' : 'Paused'}
+          </span>
+        </div>
         <div className="flex items-center gap-2 flex-wrap">
           <div className="relative">
             <input
@@ -246,6 +265,13 @@ function LogsViewer({ issueKey, logOutput, logMeta, agent, setAgent, logRef, han
             <option value="feedback-parser">Feedback Parser</option>
           </select>
           <button
+            onClick={() => setWrapLines(!wrapLines)}
+            className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md text-sm hover:bg-gray-200"
+            title={wrapLines ? 'Disable line wrap' : 'Enable line wrap'}
+          >
+            {wrapLines ? 'Wrap' : 'No wrap'}
+          </button>
+          <button
             onClick={onCopy}
             className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md text-sm hover:bg-gray-200 flex items-center gap-1"
             title="Copy logs to clipboard"
@@ -255,17 +281,40 @@ function LogsViewer({ issueKey, logOutput, logMeta, agent, setAgent, logRef, han
             </svg>
             Copy
           </button>
+          <button
+            onClick={() => setFullscreen(!fullscreen)}
+            className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md text-sm hover:bg-gray-200"
+            title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'}
+          >
+            {fullscreen ? 'Exit' : 'Fullscreen'}
+          </button>
         </div>
       </div>
 
-      <div ref={logRef} onScroll={handleScroll} className="log-viewer">
-        {searchTerm ? filteredLines.join('\n') || '(no matches)' : logOutput}
+      <div className="log-viewer-wrap">
+        <div
+          ref={logRef}
+          onScroll={handleScroll}
+          className={`log-viewer ${fullscreen ? 'log-viewer-fullscreen' : ''} ${wrapLines ? '' : 'log-viewer-nowrap'}`}
+        >
+          {visibleLines.length === 0
+            ? <div className="log-line log-line-empty">(no matches)</div>
+            : visibleLines.map((line, i) => <LogLine key={i} line={line} />)}
+        </div>
+        {!autoScroll && (
+          <button className="log-jump-btn" onClick={onJumpToLatest} title="Jump to latest (End)">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
+            </svg>
+            Jump to latest
+          </button>
+        )}
       </div>
 
       <div className="flex items-center justify-between mt-3 text-xs text-gray-400">
         <span>
           {logMeta.lines} lines
-          {searchTerm && ` • ${filteredLines.length} match${filteredLines.length !== 1 ? 'es' : ''}`}
+          {searchTerm && ` • ${visibleLines.length} match${visibleLines.length !== 1 ? 'es' : ''}`}
         </span>
         <span>Filter: {logMeta.agent === 'all' ? 'All Logs' : logMeta.agent}</span>
       </div>
@@ -281,8 +330,10 @@ export default function PipelineDetail() {
   const [pipeline, setPipeline] = useState(null);
   const [error, setError] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [wrapLines, setWrapLines] = useState(true);
   const logRef = useRef(null);
-  const autoScrollRef = useRef(true);
   const showToast = useToast();
 
   const fetchData = useCallback(async () => {
@@ -311,15 +362,33 @@ export default function PipelineDetail() {
   usePolling(fetchData);
 
   useEffect(() => {
-    if (autoScrollRef.current && logRef.current) {
+    if (autoScroll && logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
-  }, [logOutput]);
+  }, [logOutput, autoScroll]);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setFullscreen(false);
+      if (e.key === 'End') jumpToLatest();
+      if (e.key === 'Home' && logRef.current) logRef.current.scrollTop = 0;
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullscreen]);
 
   const handleScroll = () => {
     if (!logRef.current) return;
     const { scrollHeight, scrollTop, clientHeight } = logRef.current;
-    autoScrollRef.current = scrollHeight - scrollTop - clientHeight < 50;
+    const nearBottom = scrollHeight - scrollTop - clientHeight < 50;
+    setAutoScroll((prev) => (prev === nearBottom ? prev : nearBottom));
+  };
+
+  const jumpToLatest = () => {
+    setAutoScroll(true);
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   };
 
   const handleCopyLogs = async () => {
@@ -328,6 +397,21 @@ export default function PipelineDetail() {
       showToast('Logs copied to clipboard');
     } catch (err) {
       showToast('Failed to copy logs', 'error');
+    }
+  };
+
+  const handleStop = async () => {
+    if (!window.confirm(`Stop the running agent for ${issueKey}? State and logs are kept.`)) return;
+    try {
+      const data = await api.stop(issueKey);
+      if (data.stopped) {
+        showToast(`Pipeline ${issueKey} stopping…`);
+        fetchData();
+      } else {
+        showToast(data.reason || 'No running agent to stop', 'error');
+      }
+    } catch (err) {
+      showToast(`Error: ${err.message}`, 'error');
     }
   };
 
@@ -345,6 +429,8 @@ export default function PipelineDetail() {
       showToast(`Error: ${err.message}`, 'error');
     }
   };
+
+  const isRunning = pipeline && !['failed', 'merged', 'awaiting-review'].includes(pipeline.state);
 
   return (
     <>
@@ -391,9 +477,22 @@ export default function PipelineDetail() {
                 </svg>
                 {showDetails ? 'Hide Details' : 'Show Details'}
               </button>
+              {isRunning && (
+                <button
+                  onClick={handleStop}
+                  className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-sm hover:bg-amber-600 flex items-center gap-1"
+                  title="Stop the running agent — keeps state and logs"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <rect x="6" y="6" width="12" height="12" rx="1.5"/>
+                  </svg>
+                  Stop
+                </button>
+              )}
               <button
                 onClick={handleCancel}
                 className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 flex items-center gap-1"
+                title="Cancel — delete state and logs"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/>
@@ -408,7 +507,6 @@ export default function PipelineDetail() {
           {showDetails && <InfoCard pipeline={pipeline} />}
 
           <LogsViewer
-            issueKey={issueKey}
             logOutput={logOutput}
             logMeta={logMeta}
             agent={agent}
@@ -416,6 +514,12 @@ export default function PipelineDetail() {
             logRef={logRef}
             handleScroll={handleScroll}
             onCopy={handleCopyLogs}
+            autoScroll={autoScroll}
+            onJumpToLatest={jumpToLatest}
+            fullscreen={fullscreen}
+            setFullscreen={setFullscreen}
+            wrapLines={wrapLines}
+            setWrapLines={setWrapLines}
           />
         </>
       )}

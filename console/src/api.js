@@ -23,6 +23,9 @@ const api = {
   trigger(data) {
     return this.request('POST', '/api/trigger', data);
   },
+  stop(key) {
+    return this.request('POST', `/api/status/${encodeURIComponent(key)}/stop`);
+  },
   cancel(key) {
     return this.request('DELETE', `/api/status/${encodeURIComponent(key)}`);
   },

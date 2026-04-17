@@ -12,7 +12,7 @@ export default function App() {
         <div className="bg-gray-50 text-gray-900 min-h-screen flex">
           <Sidebar />
           <main className="ml-56 flex-1 min-h-screen">
-            <div className="p-6 max-w-6xl">
+            <div className="p-6">
               <Routes>
                 <Route path="/" element={<PipelineList />} />
                 <Route path="/trigger" element={<TriggerForm />} />

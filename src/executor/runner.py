@@ -23,6 +23,39 @@ from src.providers.output_handler import get_output_handlers
 
 logger = logging.getLogger(__name__)
 
+# Registry of currently running agent processes keyed by issue key, so an
+# API caller can stop a stuck or no-longer-wanted pipeline mid-run.
+_running: dict[str, subprocess.Popen] = {}
+_running_lock = threading.Lock()
+
+
+def stop_running_agent(issue_key: str) -> bool:
+    """Terminate the agent process for an issue if one is running.
+
+    Sends SIGTERM, then SIGKILL after 3s if the process hasn't exited.
+    Returns True if a process was found and signalled, False otherwise.
+    """
+    with _running_lock:
+        proc = _running.get(issue_key)
+    if not proc or proc.poll() is not None:
+        return False
+    try:
+        proc.terminate()
+    except Exception as e:
+        logger.warning(f"terminate({issue_key}) failed: {e}")
+    try:
+        proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        logger.warning(f"Agent for {issue_key} did not exit after SIGTERM — killing")
+        proc.kill()
+    return True
+
+
+def is_agent_running(issue_key: str) -> bool:
+    with _running_lock:
+        proc = _running.get(issue_key)
+    return bool(proc and proc.poll() is None)
+
 # Prepended to every agent prompt to enforce non-interactive behavior.
 # This lives in the user-message (prompt) position — models treat this
 # with higher priority than agent-file or system-prompt instructions.
@@ -140,6 +173,9 @@ def run_agent(
             text=True,
         )
 
+        with _running_lock:
+            _running[issue_key] = proc
+
         # Stream stdout and stderr in parallel threads
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
@@ -158,32 +194,40 @@ def run_agent(
         stdout_thread.start()
         stderr_thread.start()
 
-        # Wait for process with timeout
         try:
-            exit_code = proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            stdout_thread.join(timeout=2)
-            stderr_thread.join(timeout=2)
-            handlers.on_finish(issue_key, agent_name, -1)
-            logger.error(f"Agent {agent_name} timed out after {timeout}s")
-            return {"success": False, "output": "\n".join(stdout_lines), "error": f"Timed out after {timeout}s", "exit_code": -1}
+            # Wait for process with timeout
+            try:
+                exit_code = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                stdout_thread.join(timeout=2)
+                stderr_thread.join(timeout=2)
+                handlers.on_finish(issue_key, agent_name, -1)
+                logger.error(f"Agent {agent_name} timed out after {timeout}s")
+                return {"success": False, "output": "\n".join(stdout_lines), "error": f"Timed out after {timeout}s", "exit_code": -1}
 
-        # Wait for stream threads to finish
-        stdout_thread.join(timeout=5)
-        stderr_thread.join(timeout=5)
+            # Wait for stream threads to finish
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
 
-        handlers.on_finish(issue_key, agent_name, exit_code)
+            handlers.on_finish(issue_key, agent_name, exit_code)
 
-        stdout = "\n".join(stdout_lines)
-        stderr = "\n".join(stderr_lines)
-        parsed = adapter.parse_output(stdout, stderr, exit_code)
+            stdout = "\n".join(stdout_lines)
+            stderr = "\n".join(stderr_lines)
+            parsed = adapter.parse_output(stdout, stderr, exit_code)
 
-        logger.info(f"Agent {agent_name} exited with code {exit_code}")
-        if stderr:
-            logger.warning(f"Agent {agent_name} stderr: {stderr[:500]}")
+            logger.info(f"Agent {agent_name} exited with code {exit_code}")
+            if stderr:
+                logger.warning(f"Agent {agent_name} stderr: {stderr[:500]}")
 
-        return {**parsed, "exit_code": exit_code}
+            # A negative exit code here means the process was killed externally
+            # (e.g. stop_running_agent) — surface that as a clean failure.
+            if exit_code is not None and exit_code < 0:
+                return {"success": False, "output": stdout, "error": "Stopped by user", "exit_code": exit_code}
+            return {**parsed, "exit_code": exit_code}
+        finally:
+            with _running_lock:
+                _running.pop(issue_key, None)
 
     except FileNotFoundError:
         handlers.on_finish(issue_key, agent_name, -1)

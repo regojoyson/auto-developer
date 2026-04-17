@@ -1,36 +1,160 @@
 @import "tailwindcss";
 
 /* Terminal-style log viewer */
-.log-viewer {
-  background: #1a1a2e;
-  color: #e0e0e0;
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-  font-size: 13px;
-  line-height: 1.5;
-  padding: 16px;
-  border-radius: 8px;
-  white-space: pre-wrap;
-  word-break: break-all;
-  overflow-y: auto;
-  max-height: 70vh;
-  min-height: 300px;
+.log-panel {
+  width: 100%;
 }
 
+.log-panel-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px;
+}
+
+.log-viewer-wrap {
+  position: relative;
+}
+
+.log-viewer {
+  background: #0f1020;
+  color: #d7d9e4;
+  font-family: 'JetBrains Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  padding: 14px 16px;
+  border-radius: 8px;
+  overflow: auto;
+  max-height: 72vh;
+  min-height: 360px;
+  border: 1px solid #1d1f35;
+}
+
+.log-panel-fullscreen .log-viewer-wrap {
+  flex: 1;
+  min-height: 0;
+}
+
+.log-viewer-fullscreen {
+  max-height: none;
+  height: 100%;
+  border-radius: 6px;
+}
+
+.log-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.log-viewer-nowrap .log-line {
+  white-space: pre;
+  word-break: normal;
+}
+
+.log-line:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.log-line-empty {
+  color: #6b6f80;
+  font-style: italic;
+}
+
+/* Tag colors — match the formatter's [tag] prefixes */
+.log-tag {
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.log-tag-init                    { color: #7ab7ff; }
+.log-tag-assistant               { color: #c5cae9; }
+.log-tag-tool                    { color: #f9c74f; }
+.log-tag-result                  { color: #7cd992; }
+.log-tag-thinking                { color: #b39ddb; font-style: italic; }
+.log-tag-done                    { color: #4ade80; }
+.log-tag-err                     { color: #ef5350; }
+.log-tag-error                   { color: #ef5350; }
+.log-tag-agent-orchestrator      { color: #64b5f6; }
+.log-tag-agent-feedback-parser   { color: #ba68c8; }
+
 .log-viewer::-webkit-scrollbar {
-  width: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 .log-viewer::-webkit-scrollbar-track {
-  background: #1a1a2e;
+  background: #0f1020;
 }
 
 .log-viewer::-webkit-scrollbar-thumb {
-  background: #4a4a6a;
-  border-radius: 4px;
+  background: #353859;
+  border-radius: 5px;
 }
 
 .log-viewer::-webkit-scrollbar-thumb:hover {
-  background: #6a6a8a;
+  background: #555a82;
+}
+
+/* Live/paused indicator */
+.log-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 10px;
+  border-radius: 9999px;
+}
+
+.log-status-live {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.log-status-paused {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.log-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.log-status-live .log-status-dot {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+/* Jump-to-latest floating button */
+.log-jump-btn {
+  position: absolute;
+  right: 18px;
+  bottom: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(30, 64, 175, 0.95);
+  color: #fff;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  border: 0;
+}
+
+.log-jump-btn:hover {
+  background: rgba(37, 99, 235, 1);
 }
 
 /* State badges */
